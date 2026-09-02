@@ -4,7 +4,7 @@ const Session = require('../models/Session');
 const { checkLocation } = require('../utils/locationCheck');
 
 /**
- * Mark Attendance using 4-digit code + GPS Verification (30 meters radius)
+ * Mark Attendance using 4-digit code + GPS Verification (Configurable radius)
  * POST /api/student/mark-attendance
  */
 exports.markAttendance = async (req, res) => {
@@ -43,43 +43,55 @@ exports.markAttendance = async (req, res) => {
       });
     }
 
-    // Find active session matching code
-    const session = await Session.findOne({
-      code: code.toString().trim(),
+    const cleanCode = code.toString().trim();
+    const now = new Date();
+
+    // Find active sessions matching code. If multiple teachers are running sessions,
+    // match the session for this student's class and section.
+    let sessions = await Session.find({
+      code: cleanCode,
       status: 'active'
     });
 
-    if (!session) {
+    if (!sessions || sessions.length === 0) {
       return res.status(400).json({
         success: false,
         message: 'Invalid session code or session has expired.'
       });
     }
 
-    // Check if session has timed out (2 minutes limit)
-    const now = new Date();
-    if (now > new Date(session.expiresAt)) {
-      session.status = 'expired';
-      await session.save();
+    // Filter out expired sessions
+    sessions = sessions.filter((s) => new Date(s.expiresAt) > now);
+    if (sessions.length === 0) {
       return res.status(400).json({
         success: false,
-        message: 'This attendance session has expired (exceeded 2 minutes limit).'
+        message: 'This attendance session has expired.'
       });
     }
 
-    // Check if class & section match (case-insensitive & trimmed)
-    if (
-      session.class.trim().toLowerCase() !== student.class.trim().toLowerCase() ||
-      session.section.trim().toLowerCase() !== student.section.trim().toLowerCase()
-    ) {
-      return res.status(403).json({
-        success: false,
-        message: `This session is for Class ${session.class}-${session.section}. You are enrolled in ${student.class}-${student.section}.`
-      });
+    // Match session by student's class and section
+    let targetSession = sessions.find(
+      (s) =>
+        s.class.trim().toLowerCase() === student.class.trim().toLowerCase() &&
+        s.section.trim().toLowerCase() === student.section.trim().toLowerCase()
+    );
+
+    // If only 1 session exists with this code, use it to check class mismatch message
+    if (!targetSession) {
+      targetSession = sessions[0];
+      if (
+        targetSession.class.trim().toLowerCase() !== student.class.trim().toLowerCase() ||
+        targetSession.section.trim().toLowerCase() !== student.section.trim().toLowerCase()
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: `This session is for Class ${targetSession.class}-${targetSession.section}. You are enrolled in ${student.class}-${student.section}.`
+        });
+      }
     }
 
     // Check if student has already marked attendance for this session
-    const alreadyMarked = session.students.some(
+    const alreadyMarked = targetSession.students.some(
       (entry) => entry.studentId.toString() === student._id.toString()
     );
 
@@ -90,44 +102,65 @@ exports.markAttendance = async (req, res) => {
       });
     }
 
-    // Perform GPS Location Verification (Radius: 30 meters)
+    // Perform GPS Location Verification with Session's Configured Radius (default 200m)
+    const allowedRadius = targetSession.radius !== undefined ? targetSession.radius : 200;
     const studentLocation = { lat: numLat, lng: numLng };
-    const { isWithinRange, distance } = checkLocation(session.teacherLocation, studentLocation, 30);
+    const { isWithinRange, distance } = checkLocation(targetSession.teacherLocation, studentLocation, allowedRadius);
 
     if (!isWithinRange) {
       return res.status(403).json({
         success: false,
-        message: `GPS Verification Failed: You are ${distance} meters away from the classroom. You must be within 30 meters of the teacher.`,
+        message: `GPS Verification Failed: You are ${distance}m away. Must be within ${allowedRadius}m of the classroom.`,
         distance,
-        allowedRadius: 30
+        allowedRadius
       });
     }
 
-    // Record attendance in Session
-    const attendanceEntry = {
-      studentId: student._id,
-      markedAt: now,
-      status: 'present'
-    };
-    session.students.push(attendanceEntry);
-    await session.save();
+    // Atomically record attendance in Session to prevent race conditions during high concurrent traffic
+    const updatedSession = await Session.findOneAndUpdate(
+      {
+        _id: targetSession._id,
+        status: 'active',
+        'students.studentId': { $ne: student._id }
+      },
+      {
+        $push: {
+          students: {
+            studentId: student._id,
+            markedAt: now,
+            status: 'present'
+          }
+        }
+      },
+      { new: true }
+    );
+
+    if (!updatedSession) {
+      return res.status(400).json({
+        success: false,
+        message: 'You have already marked attendance for this session.'
+      });
+    }
 
     // Record attendance in Student profile
-    student.attendance.push({
-      sessionId: session._id,
-      subject: session.subject,
-      date: now,
-      status: 'present'
+    await Student.findByIdAndUpdate(studentId, {
+      $push: {
+        attendance: {
+          sessionId: targetSession._id,
+          subject: targetSession.subject,
+          date: now,
+          status: 'present'
+        }
+      }
     });
-    await student.save();
 
     return res.status(200).json({
       success: true,
       message: 'Attendance marked successfully!',
       data: {
-        subject: session.subject,
-        class: session.class,
-        section: session.section,
+        subject: targetSession.subject,
+        class: targetSession.class,
+        section: targetSession.section,
         markedAt: now,
         distanceMeters: distance,
         status: 'present'

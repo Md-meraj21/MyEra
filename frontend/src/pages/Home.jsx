@@ -45,28 +45,10 @@ const Home = () => {
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setActiveRoleTab('teacher')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
-                activeRoleTab === 'teacher'
-                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                  : 'text-slate-600 hover:bg-slate-100'
-              }`}
-            >
-              <UserCheck className="w-3.5 h-3.5" />
-              Teacher Portal
-            </button>
-            <button
-              onClick={() => setActiveRoleTab('student')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
-                activeRoleTab === 'student'
-                  ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-                  : 'text-slate-600 hover:bg-slate-100'
-              }`}
-            >
-              <GraduationCap className="w-3.5 h-3.5" />
-              Student Portal
-            </button>
+            <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-200">
+              <ShieldCheck className="w-3.5 h-3.5" />
+              Secure GPS Geofence
+            </span>
           </div>
         </div>
       </header>

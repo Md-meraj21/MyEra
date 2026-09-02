@@ -33,7 +33,7 @@ app.use(express.urlencoded({ extended: true }));
 // Request logging in development
 if (process.env.NODE_ENV !== 'production') {
   app.use((req, res, next) => {
-    console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
+    // console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
     next();
   });
 }

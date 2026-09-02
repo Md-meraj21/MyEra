@@ -96,12 +96,12 @@ exports.getTimetable = async (req, res) => {
 };
 
 /**
- * Start a new Attendance Session (2 minutes validity with 4-digit code & GPS coordinates)
+ * Start a new Attendance Session (Custom validity with 4-digit code & GPS coordinates)
  * POST /api/teacher/start-session
  */
 exports.startSession = async (req, res) => {
   try {
-    const { subject, class: targetClass, section, lat, lng } = req.body;
+    const { subject, class: targetClass, section, lat, lng, durationMinutes, radius } = req.body;
     const teacherId = req.body.teacherId || req.user?.id;
 
     if (!teacherId || !mongoose.Types.ObjectId.isValid(teacherId) || !subject || !targetClass || !section) {
@@ -126,10 +126,15 @@ exports.startSession = async (req, res) => {
       { $set: { status: 'expired' } }
     );
 
+    // Duration in minutes (default 5 min if not specified or invalid)
+    const validDuration = Math.max(1, Math.min(180, parseInt(durationMinutes, 10) || 5));
+    // Geofence radius in meters (default 200m, 0 means code-only / no GPS check)
+    const validRadius = radius !== undefined ? Math.max(0, parseInt(radius, 10)) : 200;
+
     // Generate unique 4-digit session code
     const code = generateCode();
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + 2 * 60 * 1000); // 2 minutes
+    const expiresAt = new Date(now.getTime() + validDuration * 60 * 1000);
 
     const session = new Session({
       teacherId,
@@ -141,6 +146,8 @@ exports.startSession = async (req, res) => {
         lat: numLat,
         lng: numLng
       },
+      durationMinutes: validDuration,
+      radius: validRadius,
       createdAt: now,
       expiresAt,
       status: 'active',
@@ -151,7 +158,7 @@ exports.startSession = async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: 'Attendance session started successfully. Code is valid for 2 minutes.',
+      message: `Attendance session started! Code: ${session.code} (Active for ${validDuration} mins)`,
       session: {
         id: session._id,
         code: session.code,
@@ -162,7 +169,9 @@ exports.startSession = async (req, res) => {
         expiresAt: session.expiresAt,
         status: session.status,
         teacherLocation: session.teacherLocation,
-        durationSeconds: 120
+        durationMinutes: validDuration,
+        radius: validRadius,
+        durationSeconds: validDuration * 60
       }
     });
   } catch (error) {
@@ -170,6 +179,96 @@ exports.startSession = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: error.message || 'Server error while starting session.'
+    });
+  }
+};
+
+/**
+ * Extend an active session by additional minutes
+ * POST /api/teacher/extend-session
+ */
+exports.extendSession = async (req, res) => {
+  try {
+    const { sessionId, extraMinutes = 2 } = req.body;
+    const teacherId = req.body.teacherId || req.user?.id;
+
+    if (!sessionId || !mongoose.Types.ObjectId.isValid(sessionId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid Session ID is required.'
+      });
+    }
+
+    const session = await Session.findOne({ _id: sessionId, teacherId });
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: 'Active session not found.'
+      });
+    }
+
+    const addMs = Math.max(1, parseInt(extraMinutes, 10) || 2) * 60 * 1000;
+    const baseTime = session.status === 'active' && new Date(session.expiresAt) > new Date()
+      ? new Date(session.expiresAt).getTime()
+      : Date.now();
+
+    session.expiresAt = new Date(baseTime + addMs);
+    session.status = 'active';
+    await session.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `Session extended by ${extraMinutes} minutes.`,
+      expiresAt: session.expiresAt
+    });
+  } catch (error) {
+    console.error('Error in extendSession:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Server error while extending session.'
+    });
+  }
+};
+
+/**
+ * Manually end/expire an active session immediately
+ * POST /api/teacher/end-session
+ */
+exports.endSession = async (req, res) => {
+  try {
+    const { sessionId } = req.body;
+    const teacherId = req.body.teacherId || req.user?.id;
+
+    if (!sessionId || !mongoose.Types.ObjectId.isValid(sessionId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid Session ID is required.'
+      });
+    }
+
+    const session = await Session.findOneAndUpdate(
+      { _id: sessionId, teacherId },
+      { $set: { status: 'expired', expiresAt: new Date() } },
+      { new: true }
+    );
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: 'Session not found.'
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Session ended successfully.',
+      session
+    });
+  } catch (error) {
+    console.error('Error in endSession:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Server error while ending session.'
     });
   }
 };
@@ -214,7 +313,7 @@ exports.getSessions = async (req, res) => {
 };
 
 /**
- * Get single session with live attendance details
+ * Get single session with live attendance details (ONLY Present Students shown)
  * GET /api/teacher/session/:sessionId
  */
 exports.getSessionDetails = async (req, res) => {
@@ -245,37 +344,24 @@ exports.getSessionDetails = async (req, res) => {
       await session.save();
     }
 
-    // Get all enrolled students in this class and section to know who is absent (case-insensitive)
-    const totalEnrolledStudents = await Student.find({
-      class: new RegExp(`^${session.class.trim()}$`, 'i'),
-      section: new RegExp(`^${session.section.trim()}$`, 'i')
-    }).select('name rollNumber email class section');
+    // Filter ONLY students who have actually marked attendance (Present)
+    const presentStudentsList = session.students
+      .filter((s) => s.status === 'present' && s.studentId)
+      .map((s) => ({
+        studentId: s.studentId._id,
+        rollNumber: s.studentId.rollNumber,
+        name: s.studentId.name,
+        email: s.studentId.email,
+        class: s.studentId.class,
+        section: s.studentId.section,
+        status: 'present',
+        markedAt: s.markedAt
+      }));
 
-    const markedMap = new Map();
-    session.students.forEach((s) => {
-      if (s.studentId) {
-        markedMap.set(s.studentId._id.toString(), s);
-      }
-    });
+    // Sort by markedAt time (most recent first)
+    presentStudentsList.sort((a, b) => new Date(b.markedAt) - new Date(a.markedAt));
 
-    const fullAttendanceList = totalEnrolledStudents.map((student) => {
-      const mark = markedMap.get(student._id.toString());
-      return {
-        studentId: student._id,
-        rollNumber: student.rollNumber,
-        name: student.name,
-        email: student.email,
-        class: student.class,
-        section: student.section,
-        status: mark ? mark.status : 'absent',
-        markedAt: mark ? mark.markedAt : null
-      };
-    });
-
-    const presentCount = session.students.filter((s) => s.status === 'present').length;
-    const totalStudents = totalEnrolledStudents.length || session.students.length;
-    const absentCount = Math.max(0, totalStudents - presentCount);
-    const percentage = totalStudents > 0 ? Math.round((presentCount / totalStudents) * 100) : 0;
+    const presentCount = presentStudentsList.length;
 
     return res.status(200).json({
       success: true,
@@ -289,11 +375,11 @@ exports.getSessionDetails = async (req, res) => {
         expiresAt: session.expiresAt,
         status: session.status,
         teacherLocation: session.teacherLocation,
+        durationMinutes: session.durationMinutes || 5,
+        radius: session.radius !== undefined ? session.radius : 200,
         presentCount,
-        absentCount,
-        totalStudents,
-        percentage,
-        attendanceList: fullAttendanceList
+        totalStudents: presentCount,
+        attendanceList: presentStudentsList
       }
     });
   } catch (error) {

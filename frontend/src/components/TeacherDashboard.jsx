@@ -35,7 +35,10 @@ const TeacherDashboard = () => {
   const [actionLoading, setActionLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState(null);
 
-  const teacherId = user?.id || user?._id;
+  const [launchModalSlot, setLaunchModalSlot] = useState(null);
+  const [selectedDuration, setSelectedDuration] = useState(5); // 5 mins default
+  const [customDuration, setCustomDuration] = useState('');
+  const [selectedRadius, setSelectedRadius] = useState(200); // 200m default
 
   // Load teacher initial data (Timetable & Past Sessions)
   const fetchTeacherData = async () => {
@@ -91,6 +94,12 @@ const TeacherDashboard = () => {
           setSessionDetails(res.data.session);
           if (res.data.session.status === 'expired') {
             setTimeLeft(0);
+          } else {
+            const rem = Math.max(
+              0,
+              Math.round((new Date(res.data.session.expiresAt).getTime() - Date.now()) / 1000)
+            );
+            setTimeLeft(rem);
           }
         }
       } catch (err) {
@@ -138,77 +147,137 @@ const TeacherDashboard = () => {
     }
   };
 
-  // Start Attendance Session with GPS capture
-  const handleStartSession = async (slot) => {
-    if (!window.isSecureContext && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-      const secureMsg = 'GPS Location requires HTTPS. Please open the app via the live HTTPS link or localhost.';
-      alert(secureMsg);
-      setStatusMessage({ type: 'error', text: secureMsg });
+  // Open Launch Modal
+  const openLaunchModal = (slot) => {
+    setLaunchModalSlot(slot);
+    setSelectedDuration(5);
+    setCustomDuration('');
+    setSelectedRadius(200);
+  };
+
+  // Confirm and Start Attendance Session
+  const handleConfirmLaunch = async () => {
+    if (!launchModalSlot) return;
+
+    const finalDuration = customDuration ? parseInt(customDuration, 10) : selectedDuration;
+    if (!finalDuration || finalDuration <= 0) {
+      alert('Please enter a valid session duration in minutes.');
+      return;
+    }
+
+    const slot = launchModalSlot;
+    setActionLoading(true);
+    setStatusMessage({ type: 'info', text: 'Acquiring teacher classroom location...' });
+
+    const proceedWithLocation = async (lat, lng) => {
+      try {
+        const res = await teacherAPI.startSession({
+          teacherId,
+          subject: slot.subject,
+          class: slot.class,
+          section: slot.section,
+          lat,
+          lng,
+          durationMinutes: finalDuration,
+          radius: selectedRadius
+        });
+
+        if (res.data.success) {
+          setCurrentSession(res.data.session);
+          setTimeLeft(finalDuration * 60);
+          setLaunchModalSlot(null);
+          setActiveTab('active_session');
+          setStatusMessage({
+            type: 'success',
+            text: `Attendance Session started! Code: ${res.data.session.code} (Active for ${finalDuration}m)`
+          });
+          fetchTeacherData();
+        }
+      } catch (err) {
+        console.error('Failed to start session:', err);
+        setStatusMessage({
+          type: 'error',
+          text: err.response?.data?.message || 'Failed to start attendance session.'
+        });
+      } finally {
+        setActionLoading(false);
+      }
+    };
+
+    // If Code-Only mode (radius = 0), we don't strictly require hardware GPS
+    if (selectedRadius === 0) {
+      proceedWithLocation(0, 0);
       return;
     }
 
     if (!navigator.geolocation) {
-      alert('Geolocation is not supported by your browser. Please enable GPS permissions.');
+      // Fallback for devices without GPS
+      proceedWithLocation(0, 0);
       return;
     }
 
-    setActionLoading(true);
-    setStatusMessage({ type: 'info', text: 'Detecting teacher classroom GPS coordinates...' });
-
     navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
-
-        try {
-          const res = await teacherAPI.startSession({
-            teacherId,
-            subject: slot.subject,
-            class: slot.class,
-            section: slot.section,
-            lat,
-            lng
-          });
-
-          if (res.data.success) {
-            setCurrentSession(res.data.session);
-            setTimeLeft(120);
-            setActiveTab('active_session');
-            setStatusMessage({
-              type: 'success',
-              text: `Attendance Session started! 4-Digit Code: ${res.data.session.code}`
-            });
-            fetchTeacherData();
-          }
-        } catch (err) {
-          console.error('Failed to start session:', err);
-          setStatusMessage({
-            type: 'error',
-            text: err.response?.data?.message || 'Failed to start attendance session.'
-          });
-        } finally {
-          setActionLoading(false);
-        }
+      (pos) => {
+        proceedWithLocation(pos.coords.latitude, pos.coords.longitude);
       },
       (geoError) => {
-        setActionLoading(false);
-        console.error('GPS error:', geoError);
-        let errorHint = `Location permission error: ${geoError.message}`;
-        if (geoError.code === 1) {
-          errorHint = 'Location access denied. Please click the Lock icon 🔒 or site settings in your browser address bar and allow Location permissions.';
-        } else if (geoError.code === 2) {
-          errorHint = 'Location unavailable. Please make sure your device GPS / Location toggle is turned ON.';
-        } else if (geoError.code === 3) {
-          errorHint = 'Location request timed out. Please retry or move near an open window for better GPS reception.';
-        }
-        alert(errorHint);
-        setStatusMessage({
-          type: 'error',
-          text: errorHint
-        });
+        console.warn('GPS prompt failed or denied, launching with standard fallback coords:', geoError);
+        // Fallback: start session so teacher is not blocked by laptop Wi-Fi location error
+        proceedWithLocation(28.6139, 77.2090); // default reference coordinates
       },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
+  };
+
+  // Extend Session Time
+  const handleExtendSession = async (extraMins) => {
+    if (!currentSession) return;
+    try {
+      setActionLoading(true);
+      const res = await teacherAPI.extendSession({
+        sessionId: currentSession.id || currentSession._id,
+        extraMinutes: extraMins,
+        teacherId
+      });
+      if (res.data.success) {
+        const remaining = Math.max(
+          0,
+          Math.round((new Date(res.data.expiresAt).getTime() - Date.now()) / 1000)
+        );
+        setTimeLeft(remaining);
+        setStatusMessage({ type: 'success', text: `Session extended by ${extraMins} minutes!` });
+        // update current session
+        setCurrentSession((prev) => ({ ...prev, expiresAt: res.data.expiresAt }));
+      }
+    } catch (err) {
+      console.error('Failed to extend session:', err);
+      setStatusMessage({ type: 'error', text: err.response?.data?.message || 'Failed to extend session.' });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // End Session Early
+  const handleEndSession = async () => {
+    if (!currentSession) return;
+    if (!confirm('Are you sure you want to end this attendance session now?')) return;
+    try {
+      setActionLoading(true);
+      const res = await teacherAPI.endSession({
+        sessionId: currentSession.id || currentSession._id,
+        teacherId
+      });
+      if (res.data.success) {
+        setTimeLeft(0);
+        setCurrentSession((prev) => ({ ...prev, status: 'expired' }));
+        setStatusMessage({ type: 'info', text: 'Attendance session has been ended.' });
+      }
+    } catch (err) {
+      console.error('Failed to end session:', err);
+      setStatusMessage({ type: 'error', text: err.response?.data?.message || 'Failed to end session.' });
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   // Trigger Excel Download
@@ -480,12 +549,12 @@ const TeacherDashboard = () => {
                       </div>
 
                       <button
-                        onClick={() => handleStartSession(slot)}
+                        onClick={() => openLaunchModal(slot)}
                         disabled={actionLoading}
                         className="mt-4 w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 shadow-sm shadow-emerald-600/20 active:scale-95 disabled:opacity-50"
                       >
                         <Play className="w-3.5 h-3.5 fill-current" />
-                        <span>Start Attendance Session</span>
+                        <span>Configure & Start Session</span>
                       </button>
                     </div>
                   ))}
@@ -508,7 +577,7 @@ const TeacherDashboard = () => {
             <Timetable
               timetable={timetable}
               onSaveTimetable={handleSaveTimetable}
-              onStartSession={handleStartSession}
+              onStartSession={openLaunchModal}
               isTeacher={true}
             />
           </div>
@@ -531,7 +600,7 @@ const TeacherDashboard = () => {
                               : 'bg-slate-200 text-slate-700'
                           }`}
                         >
-                          {timeLeft > 0 ? '🟢 Session Active (120s TTL)' : '⚪ Session Expired'}
+                          {timeLeft > 0 ? '🟢 Session Active' : '⚪ Session Expired'}
                         </span>
                         <span className="text-xs font-semibold text-slate-400">
                           Started at {new Date(currentSession.createdAt).toLocaleTimeString()}
@@ -540,21 +609,25 @@ const TeacherDashboard = () => {
                       <h2 className="text-2xl sm:text-3xl font-black text-slate-900">
                         {currentSession.subject}
                       </h2>
-                      <div className="flex flex-wrap items-center gap-3 text-xs font-bold text-slate-600 mt-2">
+                      <div className="flex flex-wrap items-center gap-2.5 text-xs font-bold text-slate-600 mt-2.5">
                         <span className="px-2.5 py-1 bg-slate-100 rounded-lg">Class: {currentSession.class}</span>
                         <span className="px-2.5 py-1 bg-slate-100 rounded-lg">Section: {currentSession.section}</span>
                         <span className="px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-lg flex items-center gap-1">
+                          <Clock className="w-3.5 h-3.5" />
+                          Duration: {currentSession.durationMinutes || 5} mins
+                        </span>
+                        <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-lg flex items-center gap-1">
                           <MapPin className="w-3.5 h-3.5" />
-                          Lat: {currentSession.teacherLocation?.lat?.toFixed(4)}, Lng: {currentSession.teacherLocation?.lng?.toFixed(4)}
+                          Geofence: {currentSession.radius === 0 ? 'Code-Only (No GPS)' : `${currentSession.radius || 200}m`}
                         </span>
                       </div>
                     </div>
 
-                    {/* Big Code & Timer Widget */}
-                    <div className="flex items-center gap-4 self-start lg:self-auto">
+                    {/* Big Code & Timer Widget + Controls */}
+                    <div className="flex flex-wrap items-center gap-4 self-start lg:self-auto">
                       <div className="bg-emerald-50 border-2 border-emerald-200 text-center px-6 py-4 rounded-3xl">
                         <p className="text-[11px] font-black text-emerald-800 uppercase tracking-wider">
-                          Session Code
+                          4-Digit Code
                         </p>
                         <p className="text-4xl font-black text-emerald-600 tracking-widest mt-0.5">
                           {currentSession.code}
@@ -563,68 +636,76 @@ const TeacherDashboard = () => {
 
                       <div className="bg-slate-900 text-white text-center px-6 py-4 rounded-3xl shadow-md">
                         <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                          Timer
+                          Time Left
                         </p>
-                        <p className="text-3xl font-black font-mono mt-0.5">
+                        <p className={`text-3xl font-black font-mono mt-0.5 ${timeLeft <= 30 && timeLeft > 0 ? 'text-amber-400 animate-pulse' : ''}`}>
                           {formatTime(timeLeft)}
                         </p>
                       </div>
                     </div>
                   </div>
 
-                  {/* Attendance Stats Strip */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-6 text-center">
-                    <div className="bg-slate-50 p-4 rounded-2xl">
-                      <p className="text-xs text-slate-500 font-semibold">Total Enrolled</p>
-                      <p className="text-xl font-bold text-slate-800 mt-1">
-                        {sessionDetails?.totalStudents || 0}
-                      </p>
+                  {/* Session Action Bar */}
+                  <div className="pt-6 flex flex-wrap items-center justify-between gap-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-bold text-slate-500 mr-1">Extend Time:</span>
+                      <button
+                        onClick={() => handleExtendSession(2)}
+                        disabled={actionLoading}
+                        className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
+                      >
+                        +2 Mins
+                      </button>
+                      <button
+                        onClick={() => handleExtendSession(5)}
+                        disabled={actionLoading}
+                        className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
+                      >
+                        +5 Mins
+                      </button>
+                      <button
+                        onClick={() => handleExtendSession(10)}
+                        disabled={actionLoading}
+                        className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
+                      >
+                        +10 Mins
+                      </button>
+                      {timeLeft > 0 && (
+                        <button
+                          onClick={handleEndSession}
+                          disabled={actionLoading}
+                          className="ml-2 px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition"
+                        >
+                          End Session Early
+                        </button>
+                      )}
                     </div>
-                    <div className="bg-emerald-50 p-4 rounded-2xl">
-                      <p className="text-xs text-emerald-700 font-semibold">Marked Present</p>
-                      <p className="text-xl font-bold text-emerald-700 mt-1">
-                        {sessionDetails?.presentCount || 0}
-                      </p>
-                    </div>
-                    <div className="bg-rose-50 p-4 rounded-2xl">
-                      <p className="text-xs text-rose-700 font-semibold">Absent / Pending</p>
-                      <p className="text-xl font-bold text-rose-700 mt-1">
-                        {sessionDetails?.absentCount || 0}
-                      </p>
-                    </div>
-                    <div className="bg-indigo-50 p-4 rounded-2xl">
-                      <p className="text-xs text-indigo-700 font-semibold">Turnout Rate</p>
-                      <p className="text-xl font-bold text-indigo-700 mt-1">
-                        {sessionDetails?.percentage || 0}%
-                      </p>
-                    </div>
-                  </div>
 
-                  <div className="mt-6 flex flex-wrap items-center justify-between gap-4 pt-6 border-t border-slate-100">
-                    <div className="flex items-center gap-2 text-xs text-slate-500">
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-600" />
-                      <span>Live attendance automatically refreshing every 3 seconds</span>
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2 text-xs text-slate-500">
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-600" />
+                        <span className="hidden sm:inline">Live polling</span>
+                      </div>
+                      <button
+                        onClick={() => handleDownloadExcel(currentSession.id || currentSession._id)}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-md shadow-emerald-600/20"
+                      >
+                        <Download className="w-4 h-4" />
+                        <span>Excel Sheet</span>
+                      </button>
                     </div>
-
-                    <button
-                      onClick={() => handleDownloadExcel(currentSession.id || currentSession._id)}
-                      className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-md shadow-emerald-600/20"
-                    >
-                      <Download className="w-4 h-4" />
-                      <span>Download Excel Sheet (.xlsx)</span>
-                    </button>
                   </div>
                 </div>
 
-                {/* Live Student Roll List */}
+                {/* Live Student Roll List - ONLY Present Students */}
                 <div className="bg-white rounded-3xl border border-slate-200/90 shadow-sm overflow-hidden">
                   <div className="p-6 border-b border-slate-100 flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <Users className="w-5 h-5 text-indigo-600" />
-                      <h3 className="text-base font-bold text-slate-900">Student Attendance Roster</h3>
+                      <Users className="w-5 h-5 text-emerald-600" />
+                      <h3 className="text-base font-bold text-slate-900">Present Students Roster</h3>
                     </div>
-                    <span className="text-xs font-bold px-3 py-1 bg-slate-100 rounded-lg text-slate-600">
-                      {sessionDetails?.presentCount || 0} Present / {sessionDetails?.totalStudents || 0} Total
+                    <span className="text-xs font-bold px-3.5 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl">
+                      {sessionDetails?.presentCount || 0} Students Present
                     </span>
                   </div>
 
@@ -641,50 +722,40 @@ const TeacherDashboard = () => {
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {sessionDetails?.attendanceList && sessionDetails.attendanceList.length > 0 ? (
-                          sessionDetails.attendanceList.map((st, idx) => {
-                            const isPresent = st.status === 'present';
-                            return (
-                              <tr key={idx} className="hover:bg-slate-50/60 transition-colors">
-                                <td className="py-3.5 px-6 font-mono font-bold text-slate-800">
-                                  {st.rollNumber}
-                                </td>
-                                <td className="py-3.5 px-6 font-semibold text-slate-900">
-                                  {st.name}
-                                </td>
-                                <td className="py-3.5 px-6 text-xs text-slate-500 font-medium">
-                                  {st.class} - {st.section}
-                                </td>
-                                <td className="py-3.5 px-6 text-xs text-slate-500 font-mono">
-                                  {st.markedAt ? new Date(st.markedAt).toLocaleTimeString() : '—'}
-                                </td>
-                                <td className="py-3.5 px-6 text-right">
-                                  <span
-                                    className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold ${
-                                      isPresent
-                                        ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                                        : 'bg-rose-100 text-rose-800 border border-rose-300'
-                                    }`}
-                                  >
-                                    {isPresent ? (
-                                      <>
-                                        <CheckCircle className="w-3.5 h-3.5" />
-                                        Present
-                                      </>
-                                    ) : (
-                                      <>
-                                        <XCircle className="w-3.5 h-3.5" />
-                                        Absent
-                                      </>
-                                    )}
-                                  </span>
-                                </td>
-                              </tr>
-                            );
-                          })
+                          sessionDetails.attendanceList.map((st, idx) => (
+                            <tr key={idx} className="hover:bg-slate-50/60 transition-colors">
+                              <td className="py-3.5 px-6 font-mono font-bold text-slate-800">
+                                {st.rollNumber}
+                              </td>
+                              <td className="py-3.5 px-6 font-semibold text-slate-900">
+                                {st.name}
+                              </td>
+                              <td className="py-3.5 px-6 text-xs text-slate-500 font-medium">
+                                {st.class} - {st.section}
+                              </td>
+                              <td className="py-3.5 px-6 text-xs text-slate-500 font-mono">
+                                {st.markedAt ? new Date(st.markedAt).toLocaleTimeString() : '—'}
+                              </td>
+                              <td className="py-3.5 px-6 text-right">
+                                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                  <CheckCircle className="w-3.5 h-3.5" />
+                                  Present
+                                </span>
+                              </td>
+                            </tr>
+                          ))
                         ) : (
                           <tr>
-                            <td colSpan={5} className="py-12 text-center text-slate-400 text-xs">
-                              Waiting for students to submit the 4-digit code within 30m range...
+                            <td colSpan={5} className="py-14 text-center">
+                              <div className="max-w-xs mx-auto text-center space-y-2">
+                                <div className="w-10 h-10 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto animate-pulse">
+                                  <Users className="w-5 h-5" />
+                                </div>
+                                <p className="text-xs font-bold text-slate-700">Waiting for student submissions...</p>
+                                <p className="text-[11px] text-slate-400">
+                                  Students will enter code <strong>{currentSession.code}</strong> to appear here in real time.
+                                </p>
+                              </div>
                             </td>
                           </tr>
                         )}
@@ -698,13 +769,13 @@ const TeacherDashboard = () => {
                 <Radio className="w-12 h-12 text-slate-300 mx-auto mb-3" />
                 <h3 className="text-base font-bold text-slate-800">No Active Attendance Session</h3>
                 <p className="text-xs text-slate-500 mt-1 mb-5">
-                  Pick a period from your weekly timetable or overview to launch a 2-minute GPS verified check-in.
+                  Pick a period from your weekly timetable or overview to launch a GPS verified check-in.
                 </p>
                 <button
                   onClick={() => setActiveTab('overview')}
                   className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-md shadow-emerald-600/20"
                 >
-                  Go to Timetable
+                  Go to Today's Schedule
                 </button>
               </div>
             )}
@@ -797,6 +868,180 @@ const TeacherDashboard = () => {
           </div>
         )}
       </main>
+
+      {/* LAUNCH SESSION CONFIGURATION MODAL */}
+      {launchModalSlot && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl border border-slate-100 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-emerald-600 to-teal-600 p-6 text-white">
+              <div className="flex items-center justify-between mb-1">
+                <span className="px-2.5 py-0.5 rounded-full bg-white/20 text-white font-bold text-[10px] uppercase tracking-wider">
+                  Session Setup
+                </span>
+                <button
+                  onClick={() => setLaunchModalSlot(null)}
+                  className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white text-sm"
+                >
+                  ✕
+                </button>
+              </div>
+              <h3 className="text-xl font-black">{launchModalSlot.subject}</h3>
+              <p className="text-xs text-emerald-100 mt-0.5">
+                Class: {launchModalSlot.class} | Section: {launchModalSlot.section}
+              </p>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-6">
+              {/* Duration Setting */}
+              <div>
+                <label className="block text-xs font-extrabold text-slate-800 uppercase tracking-wider mb-2">
+                  1. Session Active Duration
+                </label>
+                <div className="grid grid-cols-4 gap-2 mb-2.5">
+                  {[2, 5, 10, 15].map((mins) => (
+                    <button
+                      key={mins}
+                      type="button"
+                      onClick={() => { setSelectedDuration(mins); setCustomDuration(''); }}
+                      className={`py-2 rounded-xl text-xs font-bold transition border ${
+                        selectedDuration === mins && !customDuration
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      {mins} Mins
+                    </button>
+                  ))}
+                </div>
+                <div className="grid grid-cols-4 gap-2">
+                  {[30, 45, 60].map((mins) => (
+                    <button
+                      key={mins}
+                      type="button"
+                      onClick={() => { setSelectedDuration(mins); setCustomDuration(''); }}
+                      className={`py-2 rounded-xl text-xs font-bold transition border ${
+                        selectedDuration === mins && !customDuration
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      {mins} Mins
+                    </button>
+                  ))}
+                  <div className="relative">
+                    <input
+                      type="number"
+                      placeholder="Custom"
+                      min="1"
+                      max="180"
+                      value={customDuration}
+                      onChange={(e) => setCustomDuration(e.target.value)}
+                      className={`w-full py-2 px-2 text-center rounded-xl text-xs font-bold border outline-none ${
+                        customDuration
+                          ? 'border-emerald-600 ring-2 ring-emerald-500/20 bg-emerald-50/30'
+                          : 'border-slate-200 bg-slate-50'
+                      }`}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Geofence Tolerance Setting */}
+              <div>
+                <label className="block text-xs font-extrabold text-slate-800 uppercase tracking-wider mb-2">
+                  2. GPS Geofence Range (Fixes Laptop / Phone distance)
+                </label>
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedRadius(200)}
+                    className={`w-full p-3 rounded-2xl border text-left transition flex items-center justify-between ${
+                      selectedRadius === 200
+                        ? 'border-emerald-500 bg-emerald-50/50 ring-2 ring-emerald-500/20'
+                        : 'border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-bold text-slate-900">200m - Room / Campus (Recommended)</span>
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-emerald-600 text-white">Default</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5">Best when teacher is on Laptop Wi-Fi and students on Phone.</p>
+                    </div>
+                    <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${selectedRadius === 200 ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-300'}`}>
+                      {selectedRadius === 200 && <span className="text-[10px]">✓</span>}
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedRadius(50)}
+                    className={`w-full p-3 rounded-2xl border text-left transition flex items-center justify-between ${
+                      selectedRadius === 50
+                        ? 'border-emerald-500 bg-emerald-50/50 ring-2 ring-emerald-500/20'
+                        : 'border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div>
+                      <span className="text-xs font-bold text-slate-900">50m - Strict Classroom Only</span>
+                      <p className="text-[11px] text-slate-500 mt-0.5">High precision presence inside the exact room.</p>
+                    </div>
+                    <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${selectedRadius === 50 ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-300'}`}>
+                      {selectedRadius === 50 && <span className="text-[10px]">✓</span>}
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedRadius(0)}
+                    className={`w-full p-3 rounded-2xl border text-left transition flex items-center justify-between ${
+                      selectedRadius === 0
+                        ? 'border-emerald-500 bg-emerald-50/50 ring-2 ring-emerald-500/20'
+                        : 'border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div>
+                      <span className="text-xs font-bold text-slate-900">Code-Only Mode (No GPS Location Check)</span>
+                      <p className="text-[11px] text-slate-500 mt-0.5">100% bypass of GPS — students only need the 4-digit code.</p>
+                    </div>
+                    <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${selectedRadius === 0 ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-300'}`}>
+                      {selectedRadius === 0 && <span className="text-[10px]">✓</span>}
+                    </div>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-6 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setLaunchModalSlot(null)}
+                className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-200 transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmLaunch}
+                disabled={actionLoading}
+                className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-md shadow-emerald-600/25 flex items-center gap-2 active:scale-95 disabled:opacity-50"
+              >
+                {actionLoading ? (
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <Play className="w-3.5 h-3.5 fill-current" />
+                    <span>Launch Live Session ({customDuration ? `${customDuration}m` : `${selectedDuration}m`})</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

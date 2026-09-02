@@ -4,6 +4,8 @@ const {
   addTimetable,
   getTimetable,
   startSession,
+  extendSession,
+  endSession,
   getSessions,
   getSessionDetails,
   getReport,
@@ -15,6 +17,8 @@ const { verifyToken, requireRole } = require('../middleware/auth');
 router.post('/timetable', verifyToken, requireRole(['teacher']), addTimetable);
 router.get('/timetable/:id', verifyToken, getTimetable);
 router.post('/start-session', verifyToken, requireRole(['teacher']), startSession);
+router.post('/extend-session', verifyToken, requireRole(['teacher']), extendSession);
+router.post('/end-session', verifyToken, requireRole(['teacher']), endSession);
 router.get('/sessions/:id', verifyToken, requireRole(['teacher']), getSessions);
 router.get('/session/:sessionId', verifyToken, getSessionDetails);
 router.get('/report/:id', verifyToken, requireRole(['teacher']), getReport);

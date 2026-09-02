@@ -55,23 +55,37 @@ const sessionSchema = new mongoose.Schema({
       required: [true, 'Teacher longitude is required']
     }
   },
+  durationMinutes: {
+    type: Number,
+    default: 5
+  },
+  radius: {
+    type: Number,
+    default: 200 // Default 200 meters tolerance for reliable multi-device GPS / laptop Wi-Fi
+  },
   createdAt: {
     type: Date,
     default: Date.now
   },
   expiresAt: {
     type: Date,
-    default: () => new Date(Date.now() + 2 * 60 * 1000) // 2 minutes (120 seconds)
+    default: () => new Date(Date.now() + 5 * 60 * 1000) // Default 5 minutes
   },
   status: {
     type: String,
     enum: ['active', 'expired'],
-    default: 'active'
+    default: 'active',
+    index: true
   },
   students: [sessionStudentSchema]
 }, {
   timestamps: true
 });
+
+// Compound indexes for ultra-fast multi-teacher and multi-student lookups
+sessionSchema.index({ code: 1, status: 1 });
+sessionSchema.index({ teacherId: 1, status: 1 });
+sessionSchema.index({ class: 1, section: 1, status: 1 });
 
 // Method to verify whether the session has expired
 sessionSchema.methods.isExpired = function () {

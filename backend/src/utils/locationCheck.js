@@ -4,10 +4,15 @@ const haversine = require('haversine-distance');
  * Calculates distance in meters between two coordinates and checks if within maximum radius
  * @param {{ lat: number, lng: number } | { latitude: number, longitude: number }} teacherLoc 
  * @param {{ lat: number, lng: number } | { latitude: number, longitude: number }} studentLoc 
- * @param {number} maxRadiusMeters - default is 30 meters
+ * @param {number} maxRadiusMeters - default is 200 meters. If 0 or negative, bypasses GPS check.
  * @returns {{ isWithinRange: boolean, distance: number }}
  */
-const checkLocation = (teacherLoc, studentLoc, maxRadiusMeters = 30) => {
+const checkLocation = (teacherLoc, studentLoc, maxRadiusMeters = 200) => {
+  // If maxRadiusMeters is 0 or negative, teacher chose "Code-Only (No GPS)" verification
+  if (maxRadiusMeters <= 0) {
+    return { isWithinRange: true, distance: 0 };
+  }
+
   if (!teacherLoc || !studentLoc) {
     return { isWithinRange: false, distance: Infinity };
   }
@@ -39,3 +44,4 @@ const checkLocation = (teacherLoc, studentLoc, maxRadiusMeters = 30) => {
 module.exports = {
   checkLocation
 };
+

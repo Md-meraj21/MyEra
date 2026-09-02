@@ -96,71 +96,77 @@ const StudentDashboard = () => {
     setGpsStatus('acquiring');
     setStatusMessage({
       type: 'info',
-      text: 'Acquiring GPS location for 30m classroom verification...'
+      text: 'Verifying GPS location for classroom check-in...'
     });
 
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        setGpsStatus('ready');
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
+    const submitWithCoords = async (lat, lng) => {
+      try {
+        const res = await studentAPI.markAttendance({
+          studentId,
+          code: code.trim(),
+          lat,
+          lng
+        });
 
-        try {
-          const res = await studentAPI.markAttendance({
-            studentId,
-            code: code.trim(),
-            lat,
-            lng
-          });
-
-          if (res.data.success) {
-            // Trigger celebration confetti
-            try {
-              confetti({
-                particleCount: 80,
-                spread: 70,
-                origin: { y: 0.6 }
-              });
-            } catch (e) {
-              // ignore
-            }
-
-            setStatusMessage({
-              type: 'success',
-              text: `Attendance marked successfully for ${res.data.data.subject}! Verified within ${res.data.data.distanceMeters}m of teacher.`
+        if (res.data.success) {
+          // Trigger celebration confetti
+          try {
+            confetti({
+              particleCount: 80,
+              spread: 70,
+              origin: { y: 0.6 }
             });
-            setCode('');
-            fetchStudentData();
+          } catch (e) {
+            // ignore
           }
-        } catch (err) {
-          console.error('Failed to mark attendance:', err);
-          const errorMsg = err.response?.data?.message || 'Failed to mark attendance. Check code and location.';
+
+          const distText = res.data.data.distanceMeters !== undefined ? ` (Distance: ${res.data.data.distanceMeters}m)` : '';
           setStatusMessage({
-            type: 'error',
-            text: errorMsg
+            type: 'success',
+            text: `Attendance marked successfully for ${res.data.data.subject}!${distText}`
           });
-        } finally {
-          setSubmitting(false);
+          setCode('');
+          setGpsStatus('ready');
+          fetchStudentData();
         }
-      },
-      (geoError) => {
-        setSubmitting(false);
-        setGpsStatus('error');
-        console.error('GPS error:', geoError);
-        let errorHint = `Location permission error: ${geoError.message}`;
-        if (geoError.code === 1) {
-          errorHint = 'Location permission denied. Please click the Lock icon 🔒 or site settings in your browser address bar and allow Location.';
-        } else if (geoError.code === 2) {
-          errorHint = 'Location unavailable. Please make sure your device GPS / Location toggle is turned ON in phone settings.';
-        } else if (geoError.code === 3) {
-          errorHint = 'Location request timed out. Please retry or move near an open window.';
-        }
+      } catch (err) {
+        console.error('Failed to mark attendance:', err);
+        const errorMsg = err.response?.data?.message || 'Failed to mark attendance. Check code and location.';
         setStatusMessage({
           type: 'error',
-          text: errorHint
+          text: errorMsg
         });
+        setGpsStatus('error');
+      } finally {
+        setSubmitting(false);
+      }
+    };
+
+    if (!navigator.geolocation) {
+      // Direct submit with zero coords (works if teacher set Code-Only mode)
+      submitWithCoords(0, 0);
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        submitWithCoords(position.coords.latitude, position.coords.longitude);
       },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+      (geoError) => {
+        console.warn('Student GPS error, trying with standard accuracy fallback:', geoError);
+        // Retry with lower accuracy/cache before failing
+        navigator.geolocation.getCurrentPosition(
+          (fallbackPos) => {
+            submitWithCoords(fallbackPos.coords.latitude, fallbackPos.coords.longitude);
+          },
+          () => {
+            // Final fallback: try submit (if session is Code-Only, it will succeed; otherwise server will return clear distance/range error)
+            submitWithCoords(0, 0);
+          },
+          { enableHighAccuracy: false, timeout: 5000, maximumAge: 60000 }
+        );
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
   };
 
