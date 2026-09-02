@@ -40,6 +40,8 @@ const TeacherDashboard = () => {
   const [customDuration, setCustomDuration] = useState('');
   const [selectedRadius, setSelectedRadius] = useState(200); // 200m default
 
+  const teacherId = user?.id || user?._id;
+
   // Load teacher initial data (Timetable & Past Sessions)
   const fetchTeacherData = async () => {
     if (!teacherId) return;
