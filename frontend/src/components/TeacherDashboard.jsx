@@ -723,8 +723,10 @@ const TeacherDashboard = () => {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {sessionDetails?.attendanceList && sessionDetails.attendanceList.length > 0 ? (
-                          sessionDetails.attendanceList.map((st, idx) => (
+                        {sessionDetails?.attendanceList && sessionDetails.attendanceList.filter((st) => st.status === 'present' && st.markedAt).length > 0 ? (
+                          sessionDetails.attendanceList
+                            .filter((st) => st.status === 'present' && st.markedAt)
+                            .map((st, idx) => (
                             <tr key={idx} className="hover:bg-slate-50/60 transition-colors">
                               <td className="py-3.5 px-6 font-mono font-bold text-slate-800">
                                 {st.rollNumber}
@@ -736,7 +738,7 @@ const TeacherDashboard = () => {
                                 {st.class} - {st.section}
                               </td>
                               <td className="py-3.5 px-6 text-xs text-slate-500 font-mono">
-                                {st.markedAt ? new Date(st.markedAt).toLocaleTimeString() : '—'}
+                                {new Date(st.markedAt).toLocaleTimeString()}
                               </td>
                               <td className="py-3.5 px-6 text-right">
                                 <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
