@@ -319,7 +319,7 @@ const StudentDashboard = () => {
                 Enter 4-Digit Session Code
               </h2>
               <p className="text-xs text-slate-500 mt-1 mb-6">
-                Your device will share GPS coordinates to confirm you are within 30 meters of the teacher.
+                Your device will verify your presence with the teacher's active session.
               </p>
 
               <form onSubmit={handleMarkAttendance} className="space-y-5">
@@ -339,9 +339,9 @@ const StudentDashboard = () => {
                 <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200/80 text-left flex items-start gap-3">
                   <MapPin className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" />
                   <div className="text-[11px] text-slate-600">
-                    <p className="font-bold text-slate-800">GPS Haversine Verification</p>
+                    <p className="font-bold text-slate-800">Classroom Presence Verification</p>
                     <p className="mt-0.5 text-slate-500">
-                      You must be in the physical classroom (within 30m radius).
+                      High precision Geofence & passcode match.
                     </p>
                   </div>
                 </div>
