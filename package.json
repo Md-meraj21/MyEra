@@ -1,0 +1,25 @@
+{
+  "name": "myera-workspace",
+  "version": "1.0.0",
+  "description": "MyEra - Smart Classroom Attendance System",
+  "scripts": {
+    "start": "npm run start --prefix backend",
+    "live": "node start-live.js",
+    "tunnel": "node start-live.js",
+    "dev:all": "node start-live.js",
+    "backend": "npm start --prefix backend",
+    "frontend": "npm start --prefix frontend",
+    "dev:backend": "npm run dev --prefix backend",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "dev": "npm start --prefix backend",
+    "build": "npm run build --prefix frontend"
+  },
+  "keywords": [
+    "attendance",
+    "geolocation",
+    "haversine",
+    "mern"
+  ],
+  "author": "MyEra Team",
+  "license": "ISC"
+}
