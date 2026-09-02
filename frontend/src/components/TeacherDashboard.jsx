@@ -117,6 +117,8 @@ const TeacherDashboard = () => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
           clearInterval(timerInterval);
+          // Auto refresh data when session completes
+          fetchTeacherData();
           return 0;
         }
         return prev - 1;
@@ -272,7 +274,8 @@ const TeacherDashboard = () => {
       if (res.data.success) {
         setTimeLeft(0);
         setCurrentSession((prev) => ({ ...prev, status: 'expired' }));
-        setStatusMessage({ type: 'info', text: 'Attendance session has been ended.' });
+        setStatusMessage({ type: 'info', text: 'Attendance session ended. Data auto-saved to Past Sessions.' });
+        fetchTeacherData();
       }
     } catch (err) {
       console.error('Failed to end session:', err);
@@ -282,10 +285,37 @@ const TeacherDashboard = () => {
     }
   };
 
-  // Trigger Excel Download
-  const handleDownloadExcel = (sessionId) => {
-    const url = teacherAPI.getDownloadUrl(sessionId || teacherId);
-    window.open(url, '_blank');
+  // Trigger Excel Download with Axios Blob
+  const handleDownloadExcel = async (sessionId) => {
+    const targetId = sessionId || currentSession?.id || currentSession?._id || teacherId;
+    if (!targetId) return;
+
+    try {
+      setActionLoading(true);
+      setStatusMessage({ type: 'info', text: 'Preparing Excel report, downloading now...' });
+      const res = await teacherAPI.downloadExcel(targetId);
+
+      const blob = new Blob([res.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      });
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      const subName = currentSession?.subject ? `${currentSession.subject.replace(/[^a-zA-Z0-9]/g, '_')}_` : '';
+      a.download = `Attendance_${subName}${new Date().toISOString().split('T')[0]}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+      setStatusMessage({ type: 'success', text: 'Excel spreadsheet downloaded successfully!' });
+    } catch (err) {
+      console.error('Blob download failed, trying direct link fallback:', err);
+      const url = teacherAPI.getDownloadUrl(targetId);
+      window.open(url, '_blank');
+      setStatusMessage({ type: 'info', text: 'Excel download started.' });
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   // Format seconds to MM:SS
@@ -698,6 +728,39 @@ const TeacherDashboard = () => {
                     </div>
                   </div>
                 </div>
+
+                {/* Session Completed Auto-Action Card */}
+                {timeLeft === 0 && (
+                  <div className="bg-gradient-to-r from-slate-900 to-indigo-950 rounded-3xl p-6 text-white shadow-xl flex flex-col sm:flex-row items-center justify-between gap-4 animate-fade-in border border-slate-800">
+                    <div className="flex items-center gap-4 text-center sm:text-left">
+                      <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-black text-2xl flex-shrink-0">
+                        ✓
+                      </div>
+                      <div>
+                        <h4 className="text-lg font-black text-white">Attendance Session Completed!</h4>
+                        <p className="text-xs text-slate-300 mt-0.5">
+                          {sessionDetails?.presentCount || 0} student(s) marked present. Records auto-saved to database.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 w-full sm:w-auto">
+                      <button
+                        onClick={() => handleDownloadExcel(currentSession.id || currentSession._id)}
+                        disabled={actionLoading}
+                        className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold transition shadow-lg shadow-emerald-500/30 whitespace-nowrap"
+                      >
+                        <Download className="w-4 h-4" />
+                        <span>Download Excel (.xlsx)</span>
+                      </button>
+                      <button
+                        onClick={() => setActiveTab('overview')}
+                        className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition border border-white/10 whitespace-nowrap"
+                      >
+                        <span>Start Next Class</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Live Student Roll List - ONLY Present Students */}
                 <div className="bg-white rounded-3xl border border-slate-200/90 shadow-sm overflow-hidden">
