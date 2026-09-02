@@ -142,28 +142,33 @@ const StudentDashboard = () => {
       }
     };
 
-    if (!navigator.geolocation) {
-      // Direct submit with zero coords (works if teacher set Code-Only mode)
-      submitWithCoords(0, 0);
-      return;
-    }
-
     navigator.geolocation.getCurrentPosition(
       (position) => {
         submitWithCoords(position.coords.latitude, position.coords.longitude);
       },
       (geoError) => {
-        console.warn('Student GPS error, trying with standard accuracy fallback:', geoError);
-        // Retry with lower accuracy/cache before failing
+        console.warn('High accuracy GPS error, trying with standard accuracy:', geoError);
         navigator.geolocation.getCurrentPosition(
           (fallbackPos) => {
             submitWithCoords(fallbackPos.coords.latitude, fallbackPos.coords.longitude);
           },
-          () => {
-            // Final fallback: try submit (if session is Code-Only, it will succeed; otherwise server will return clear distance/range error)
-            submitWithCoords(0, 0);
+          (finalError) => {
+            setSubmitting(false);
+            setGpsStatus('error');
+            let errorHint = 'Unable to get your location. Please enable GPS in your phone settings and reload.';
+            if (finalError.code === 1) {
+              errorHint = 'Location permission denied. Click the 🔒 icon in your browser address bar and choose "Allow Location".';
+            } else if (finalError.code === 2) {
+              errorHint = 'Device GPS is turned OFF. Please swipe down and turn ON your phone Location / GPS toggle.';
+            } else if (finalError.code === 3) {
+              errorHint = 'GPS request timed out. Please stand near a window or check phone location settings.';
+            }
+            setStatusMessage({
+              type: 'error',
+              text: errorHint
+            });
           },
-          { enableHighAccuracy: false, timeout: 5000, maximumAge: 60000 }
+          { enableHighAccuracy: false, timeout: 6000, maximumAge: 60000 }
         );
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
