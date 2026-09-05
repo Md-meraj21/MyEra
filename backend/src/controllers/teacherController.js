@@ -111,12 +111,16 @@ exports.startSession = async (req, res) => {
       });
     }
 
-    const numLat = parseFloat(lat);
-    const numLng = parseFloat(lng);
-    if (isNaN(numLat) || isNaN(numLng)) {
+    const validRadius = radius !== undefined ? Math.max(0, parseInt(radius, 10)) : 200;
+
+    const numLat = parseFloat(lat) || 0;
+    const numLng = parseFloat(lng) || 0;
+
+    // If GPS is ON (radius > 0), coordinates must be real
+    if (validRadius > 0 && (isNaN(parseFloat(lat)) || isNaN(parseFloat(lng)))) {
       return res.status(400).json({
         success: false,
-        message: 'Teacher GPS coordinates (lat, lng) must be valid numbers.'
+        message: 'GPS is enabled but valid coordinates were not provided. Try again or set radius to Off.'
       });
     }
 
@@ -128,8 +132,6 @@ exports.startSession = async (req, res) => {
 
     // Duration in minutes (default 5 min if not specified or invalid)
     const validDuration = Math.max(1, Math.min(180, parseInt(durationMinutes, 10) || 5));
-    // Geofence radius in meters (default 200m, 0 means code-only / no GPS check)
-    const validRadius = radius !== undefined ? Math.max(0, parseInt(radius, 10)) : 200;
 
     // Generate unique 4-digit session code
     const code = generateCode();
@@ -269,6 +271,54 @@ exports.endSession = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: error.message || 'Server error while ending session.'
+    });
+  }
+};
+
+/**
+ * Permanently delete a session record from history
+ * DELETE /api/teacher/session/:sessionId
+ */
+exports.deleteSession = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const teacherId = req.user?.id;
+
+    if (!sessionId || !mongoose.Types.ObjectId.isValid(sessionId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid Session ID is required.'
+      });
+    }
+
+    if (!teacherId || !mongoose.Types.ObjectId.isValid(teacherId)) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized.'
+      });
+    }
+
+    const session = await Session.findOneAndDelete({
+      _id: new mongoose.Types.ObjectId(sessionId),
+      teacherId: new mongoose.Types.ObjectId(teacherId)
+    });
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: 'Session not found or unauthorized.'
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Session deleted from history.'
+    });
+  } catch (error) {
+    console.error('Error in deleteSession:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Server error while deleting session.'
     });
   }
 };
@@ -476,75 +526,27 @@ exports.downloadExcel = async (req, res) => {
     let filename = `attendance_report_${Date.now()}.xlsx`;
 
     if (session) {
-      filename = `Attendance_${session.subject.replace(/[^a-zA-Z0-9_-]/g, '_')}_${session.class}-${session.section}_${new Date(session.createdAt).toISOString().split('T')[0]}.xlsx`;
+      // Single session download — PRESENT students only, simple 3 columns
+      filename = `Attendance_${session.subject.replace(/[^a-zA-Z0-9_-]/g, '_')}_${new Date(session.createdAt).toISOString().split('T')[0]}.xlsx`;
 
-      // Get enrolled students (case-insensitive)
-      const enrolled = await Student.find({
-        class: new RegExp(`^${session.class.trim()}$`, 'i'),
-        section: new RegExp(`^${session.section.trim()}$`, 'i')
-      }).sort({ rollNumber: 1 });
+      const presentStudents = session.students
+        .filter(s => s.status === 'present' && s.studentId)
+        .sort((a, b) => new Date(a.markedAt) - new Date(b.markedAt));
 
-      const markedMap = new Map();
-      session.students.forEach((s) => {
-        if (s.studentId) {
-          markedMap.set(s.studentId._id.toString(), s);
-        }
-      });
-
-      const list = enrolled.length > 0
-        ? enrolled.map((st) => {
-            const mark = markedMap.get(st._id.toString());
-            return {
-              rollNumber: st.rollNumber,
-              name: st.name,
-              email: st.email,
-              time: mark ? new Date(mark.markedAt).toLocaleTimeString() : '-',
-              status: mark ? mark.status.toUpperCase() : 'ABSENT'
-            };
-          })
-        : session.students.map((st) => ({
-            rollNumber: st.studentId?.rollNumber || 'N/A',
-            name: st.studentId?.name || 'N/A',
-            email: st.studentId?.email || 'N/A',
-            time: st.markedAt ? new Date(st.markedAt).toLocaleTimeString() : '-',
-            status: (st.status || 'PRESENT').toUpperCase()
-          }));
-
-      const total = list.length;
-      const present = list.filter((r) => r.status === 'PRESENT').length;
-      const absent = total - present;
-      const percentage = total > 0 ? ((present / total) * 100).toFixed(1) + '%' : '0%';
-
-      rows = list.map((item, index) => ({
-        'S.No': index + 1,
-        'Roll No': item.rollNumber,
-        'Student Name': item.name,
-        'Email': item.email,
-        'Time': item.time,
-        'Status': item.status
-      }));
-
-      // Add blank row
-      rows.push({});
-      // Add Summary Rows
-      rows.push({
-        'S.No': 'SUMMARY',
-        'Roll No': `Subject: ${session.subject}`,
-        'Student Name': `Class & Sec: ${session.class} - ${session.section}`,
-        'Email': `Date: ${new Date(session.createdAt).toLocaleDateString()}`,
-        'Time': `Present: ${present} / ${total}`,
-        'Status': `Rate: ${percentage}`
-      });
-      rows.push({
-        'S.No': '',
-        'Roll No': 'Total Students',
-        'Student Name': total,
-        'Email': 'Present',
-        'Time': present,
-        'Status': `Absent: ${absent}`
-      });
+      if (presentStudents.length === 0) {
+        rows.push({ 'Roll No': 'No students marked present', 'Name': '-', 'Subject': session.subject });
+      } else {
+        presentStudents.forEach((s, i) => {
+          rows.push({
+            'S.No': i + 1,
+            'Roll No': s.studentId.rollNumber || 'N/A',
+            'Name': s.studentId.name || 'N/A',
+            'Subject': session.subject
+          });
+        });
+      }
     } else {
-      // It's a teacher ID, export all session logs
+      // Teacher-level download — all sessions, PRESENT only, simple columns
       const teacher = await Teacher.findById(id);
       if (!teacher) {
         return res.status(404).json({
@@ -555,25 +557,33 @@ exports.downloadExcel = async (req, res) => {
 
       const sessions = await Session.find({ teacherId: id })
         .sort({ createdAt: -1 })
-        .populate('students.studentId', 'name rollNumber email');
+        .populate('students.studentId', 'name rollNumber');
 
-      filename = `Teacher_${teacher ? teacher.name.replace(/\s+/g, '_') : 'Report'}_Attendance.xlsx`;
+      filename = `Attendance_${teacher.name.replace(/\s+/g, '_')}.xlsx`;
 
+      const subjectFilter = req.query.subject ? req.query.subject.trim() : null;
+      if (subjectFilter) {
+        filename = `Attendance_${teacher.name.replace(/\s+/g, '_')}_${subjectFilter.replace(/[^a-zA-Z0-9_-]/g, '_')}.xlsx`;
+      }
+
+      let rowIndex = 1;
       sessions.forEach((s) => {
-        s.students.forEach((st) => {
+        if (subjectFilter && s.subject.toLowerCase() !== subjectFilter.toLowerCase()) return;
+        const presentList = s.students.filter(st => st.status === 'present' && st.studentId);
+        presentList.forEach((st) => {
           rows.push({
-            'Date': new Date(s.createdAt).toLocaleDateString(),
+            'S.No': rowIndex++,
+            'Roll No': st.studentId.rollNumber || 'N/A',
+            'Name': st.studentId.name || 'N/A',
             'Subject': s.subject,
-            'Class': s.class,
-            'Section': s.section,
-            'Code': s.code,
-            'Roll No': st.studentId?.rollNumber || 'N/A',
-            'Student Name': st.studentId?.name || 'N/A',
-            'Marked Time': st.markedAt ? new Date(st.markedAt).toLocaleTimeString() : '-',
-            'Status': (st.status || 'present').toUpperCase()
+            'Date': new Date(s.createdAt).toLocaleDateString()
           });
         });
       });
+
+      if (rows.length === 0) {
+        rows.push({ 'Roll No': 'No present records found', 'Name': '-', 'Subject': subjectFilter || 'All' });
+      }
     }
 
     if (rows.length === 0) {

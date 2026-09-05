@@ -55,6 +55,8 @@ export const teacherAPI = {
   getReport: (teacherId) => api.get(`/teacher/report/${teacherId}`),
   getDownloadUrl: (id) => `${BASE_URL}/api/teacher/download/${id}`,
   downloadExcel: (id) => api.get(`/teacher/download/${id}`, { responseType: 'blob' }),
+  downloadExcelBySubject: (teacherId, subject) => api.get(`/teacher/download/${teacherId}`, { params: { subject }, responseType: 'blob' }),
+  deleteSession: (sessionId) => api.delete(`/teacher/session/${sessionId}`),
 };
 
 export const studentAPI = {

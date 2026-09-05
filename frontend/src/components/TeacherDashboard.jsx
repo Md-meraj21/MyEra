@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Users,
   Clock,
@@ -15,7 +15,8 @@ import {
   AlertCircle,
   MapPin,
   RefreshCw,
-  Plus
+  Plus,
+  Trash2
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { teacherAPI } from '../services/api';
@@ -34,6 +35,24 @@ const TeacherDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState(null);
+  const statusTimerRef = useRef(null);
+
+  // Auto-dismiss all status messages after N seconds
+  const showStatus = (msg) => {
+    if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+    setStatusMessage(msg);
+    const delay = msg?.type === 'error' ? 5000 : 4000;
+    statusTimerRef.current = setTimeout(() => setStatusMessage(null), delay);
+  };
+
+  useEffect(() => () => { if (statusTimerRef.current) clearTimeout(statusTimerRef.current); }, []);
+
+  const [expandedSessions, setExpandedSessions] = useState(new Set());
+  const toggleExpanded = (id) => setExpandedSessions(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
 
   const [showLaunchModal, setShowLaunchModal] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState(null);
@@ -143,11 +162,11 @@ const TeacherDashboard = () => {
       });
       if (res.data.success) {
         setTimetable(res.data.timetable);
-        setStatusMessage({ type: 'success', text: 'Timetable updated successfully!' });
+        showStatus({ type: 'success', text: 'Timetable updated successfully!' });
       }
     } catch (err) {
       console.error('Failed to update timetable:', err);
-      setStatusMessage({ type: 'error', text: err.response?.data?.message || 'Failed to update timetable.' });
+      showStatus({ type: 'error', text: err.response?.data?.message || 'Failed to update timetable.' });
     } finally {
       setActionLoading(false);
     }
@@ -156,39 +175,71 @@ const TeacherDashboard = () => {
   // Launch modal for a slot or custom session
   const openLaunchModalForSlot = (slot) => {
     setSelectedSlot(slot);
-    setCustomSubject(slot.subject);
-    setCustomClass(slot.class);
-    setCustomSection(slot.section);
+    setCustomSubject('');
+    setCustomClass('');
+    setCustomSection('');
     setSelectedDuration(5);
-    setSelectedRadius(200);
+    setSelectedRadius(0);
     setShowLaunchModal(true);
   };
 
   const openCustomLaunchModal = () => {
     setSelectedSlot(null);
-    setCustomSubject(user?.subject || 'Data Structures & Algorithms');
-    setCustomClass('CS-4A');
-    setCustomSection('A');
+    setCustomSubject('');
+    setCustomClass('');
+    setCustomSection('');
     setSelectedDuration(5);
-    setSelectedRadius(200);
+    setSelectedRadius(0);
     setShowLaunchModal(true);
   };
 
-  // Start Session with GPS
+  // Start Session handler
   const handleStartSession = async (e) => {
     e.preventDefault();
     if (!customSubject || !customClass || !customSection) {
-      setStatusMessage({ type: 'error', text: 'Please enter subject, class, and section.' });
-      return;
-    }
-
-    if (!navigator.geolocation) {
-      setStatusMessage({ type: 'error', text: 'Geolocation is not supported by your browser.' });
+      showStatus({ type: 'error', text: 'Please enter subject, class, and section.' });
       return;
     }
 
     setActionLoading(true);
-    setStatusMessage({ type: 'info', text: 'Acquiring teacher GPS coordinates...' });
+
+    // No GPS mode — skip geolocation entirely
+    if (selectedRadius === 0) {
+      try {
+        const res = await teacherAPI.startSession({
+          teacherId,
+          subject: customSubject.trim(),
+          class: customClass.trim(),
+          section: customSection.trim(),
+          lat: 0,
+          lng: 0,
+          durationMinutes: selectedDuration,
+          radius: 0
+        });
+        if (res.data.success) {
+          setCurrentSession(res.data.session);
+          setTimeLeft(res.data.session.durationSeconds || selectedDuration * 60);
+          setShowLaunchModal(false);
+          setActiveTab('overview');
+          showStatus({ type: 'success', text: `Session Active! Code: ${res.data.session.code}` });
+          fetchTeacherData();
+        }
+      } catch (err) {
+        showStatus({ type: 'error', text: err.response?.data?.message || 'Failed to start session.' });
+      } finally {
+        setActionLoading(false);
+      }
+      return;
+    }
+
+    // GPS mode — require location
+    if (!navigator.geolocation) {
+      showStatus({ type: 'error', text: 'Geolocation is not supported by your browser.' });
+      setActionLoading(false);
+      return;
+    }
+
+    showStatus({ type: 'info', text: 'Acquiring GPS location...' });
 
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
@@ -203,62 +254,25 @@ const TeacherDashboard = () => {
             durationMinutes: selectedDuration,
             radius: selectedRadius
           });
-
           if (res.data.success) {
             setCurrentSession(res.data.session);
             setTimeLeft(res.data.session.durationSeconds || selectedDuration * 60);
             setShowLaunchModal(false);
             setActiveTab('overview');
-            setStatusMessage({
-              type: 'success',
-              text: `Attendance Session Active! 4-Digit Code: ${res.data.session.code}`
-            });
+            showStatus({ type: 'success', text: `Session Active! Code: ${res.data.session.code}` });
             fetchTeacherData();
           }
         } catch (err) {
-          console.error('Error starting session:', err);
-          setStatusMessage({
-            type: 'error',
-            text: err.response?.data?.message || 'Failed to start session.'
-          });
+          showStatus({ type: 'error', text: err.response?.data?.message || 'Failed to start session.' });
         } finally {
           setActionLoading(false);
         }
       },
       (geoError) => {
-        console.warn('GPS error, using fallback coordinates:', geoError);
-        // Fallback for laptops/desktop browser
-        teacherAPI.startSession({
-          teacherId,
-          subject: customSubject.trim(),
-          class: customClass.trim(),
-          section: customSection.trim(),
-          lat: 28.6139,
-          lng: 77.2090,
-          durationMinutes: selectedDuration,
-          radius: selectedRadius
-        }).then((res) => {
-          if (res.data.success) {
-            setCurrentSession(res.data.session);
-            setTimeLeft(res.data.session.durationSeconds || selectedDuration * 60);
-            setShowLaunchModal(false);
-            setActiveTab('overview');
-            setStatusMessage({
-              type: 'success',
-              text: `Attendance Session Started! Code: ${res.data.session.code}`
-            });
-            fetchTeacherData();
-          }
-        }).catch((err) => {
-          setStatusMessage({
-            type: 'error',
-            text: err.response?.data?.message || 'Failed to start session.'
-          });
-        }).finally(() => {
-          setActionLoading(false);
-        });
+        showStatus({ type: 'error', text: 'Could not get your location. Please allow GPS access or use No GPS mode.' });
+        setActionLoading(false);
       },
-      { enableHighAccuracy: true, timeout: 8000 }
+      { timeout: 10000, enableHighAccuracy: true }
     );
   };
 
@@ -275,7 +289,7 @@ const TeacherDashboard = () => {
         setCurrentSession(null);
         setSessionDetails(null);
         setTimeLeft(0);
-        setStatusMessage({ type: 'success', text: 'Attendance session concluded.' });
+        showStatus({ type: 'success', text: 'Attendance session concluded.' });
         fetchTeacherData();
       }
     } catch (err) {
@@ -286,9 +300,11 @@ const TeacherDashboard = () => {
   };
 
   // Download Excel
-  const handleDownload = async (targetId, filename = 'attendance.xlsx') => {
+  const handleDownload = async (targetId, filename = 'attendance.xlsx', subject = null) => {
     try {
-      const res = await teacherAPI.downloadExcel(targetId);
+      const res = subject
+        ? await teacherAPI.downloadExcelBySubject(targetId, subject)
+        : await teacherAPI.downloadExcel(targetId);
       const url = window.URL.createObjectURL(new Blob([res.data]));
       const link = document.createElement('a');
       link.href = url;
@@ -298,9 +314,23 @@ const TeacherDashboard = () => {
       link.parentNode.removeChild(link);
     } catch (err) {
       console.error('Download error:', err);
-      setStatusMessage({ type: 'error', text: 'Failed to download attendance spreadsheet.' });
+      showStatus({ type: 'error', text: 'Failed to download spreadsheet.' });
     }
   };
+
+  const handleDeleteSession = async (sessionId) => {
+    if (!window.confirm('Delete this session from history? This cannot be undone.')) return;
+    try {
+      await teacherAPI.deleteSession(sessionId);
+      setSessions(prev => prev.filter(s => (s._id || s.id) !== sessionId));
+      showStatus({ type: 'success', text: 'Session removed from history.' });
+    } catch (err) {
+      showStatus({ type: 'error', text: 'Failed to delete session.' });
+    }
+  };
+
+  // Unique subjects from session history for per-subject download
+  const uniqueSubjects = [...new Set(sessions.map(s => s.subject).filter(Boolean))];
 
   const formatTimer = (seconds) => {
     const mins = Math.floor(seconds / 60);
@@ -392,8 +422,9 @@ const TeacherDashboard = () => {
               <span>{statusMessage.text}</span>
             </div>
             <button
-              onClick={() => setStatusMessage(null)}
-              className="text-xs opacity-60 hover:opacity-100 p-1"
+              onClick={() => { clearTimeout(statusTimerRef.current); setStatusMessage(null); }}
+              className="text-xs opacity-50 hover:opacity-100 p-1 ml-2"
+              aria-label="Dismiss"
             >
               ✕
             </button>
@@ -555,30 +586,9 @@ const TeacherDashboard = () => {
           </div>
         )}
 
-        {/* TAB 3: PAST SESSIONS & EXCEL DOWNLOAD */}
+        {/* TAB 3: PAST SESSIONS */}
         {activeTab === 'history' && (
-          <div className="space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-black text-slate-900 tracking-tight">
-                  Attendance Archives
-                </h2>
-                <p className="text-xs text-slate-500">
-                  Download spreadsheet reports or inspect attendee records.
-                </p>
-              </div>
-
-              {sessions.length > 0 && (
-                <button
-                  onClick={() => handleDownload(teacherId, `All_Lectures_${user?.name || 'Report'}.xlsx`)}
-                  className="px-3.5 py-2 btn-bright-blue rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
-                >
-                  <FileSpreadsheet className="w-3.5 h-3.5" />
-                  <span>Download All Lectures (.xlsx)</span>
-                </button>
-              )}
-            </div>
-
+          <div className="space-y-3">
             {sessions.length === 0 ? (
               <div className="card-human rounded-3xl p-8 text-center space-y-2">
                 <History className="w-8 h-8 text-slate-300 mx-auto" />
@@ -589,39 +599,70 @@ const TeacherDashboard = () => {
               </div>
             ) : (
               <div className="space-y-3">
-                {sessions.map((sess, idx) => (
-                  <div
-                    key={idx}
-                    className="card-human rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                  >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h4 className="text-sm font-bold text-slate-900">
-                          {sess.subject}
-                        </h4>
-                        <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-[10px] font-bold rounded-md">
-                          {sess.class}-{sess.section}
-                        </span>
+                {sessions.map((sess, idx) => {
+                  const sessId = sess._id || sess.id;
+                  const presentList = (sess.students || []).filter(s => s.status === 'present');
+                  const isOpen = expandedSessions.has(sessId);
+                  return (
+                  <div key={idx} className="card-human rounded-2xl p-4 space-y-0">
+                    {/* Session header */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="text-sm font-bold text-slate-900">{sess.subject}</h4>
+                          <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-[10px] font-bold rounded-md">
+                            {sess.class}-{sess.section}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          {new Date(sess.createdAt).toLocaleDateString()} • {new Date(sess.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • Code: <strong className="font-mono text-blue-600">{sess.code}</strong>
+                        </p>
                       </div>
-                      <p className="text-xs text-slate-500 mt-1">
-                        {new Date(sess.createdAt).toLocaleDateString()} • {new Date(sess.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • Code: <strong className="font-mono text-blue-600">{sess.code}</strong>
-                      </p>
+
+                      <div className="flex items-center gap-2 self-end sm:self-auto flex-shrink-0">
+                        <button
+                          onClick={() => toggleExpanded(sessId)}
+                          className="px-2.5 py-1 rounded-lg text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 transition"
+                        >
+                          {presentList.length} Present {isOpen ? '▲' : '▼'}
+                        </button>
+                        <button
+                          onClick={() => handleDownload(sessId, `Attendance_${sess.subject}_${sess.class}.xlsx`)}
+                          className="p-2 rounded-xl text-blue-600 hover:bg-blue-50 border border-blue-200 transition"
+                          title="Download Excel"
+                        >
+                          <Download className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteSession(sessId)}
+                          className="p-2 rounded-xl text-rose-500 hover:bg-rose-50 border border-rose-100 transition"
+                          title="Delete from history"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
 
-                    <div className="flex items-center gap-3 self-end sm:self-auto">
-                      <span className="text-xs font-bold text-slate-700 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-100">
-                        {sess.students?.length || 0} Present
-                      </span>
-                      <button
-                        onClick={() => handleDownload(sess._id || sess.id, `Attendance_${sess.subject}_${sess.class}.xlsx`)}
-                        className="p-2 rounded-xl text-blue-600 hover:bg-blue-50 border border-blue-200 transition"
-                        title="Download Excel Spreadsheet"
-                      >
-                        <Download className="w-4 h-4" />
-                      </button>
-                    </div>
+                    {/* Expandable present students list */}
+                    {isOpen && (
+                      <div className="mt-3 pt-3 border-t border-blue-50">
+                        {presentList.length === 0 ? (
+                          <p className="text-xs text-slate-400 text-center py-2">No students marked present.</p>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                            {presentList.map((s, i) => (
+                              <div key={i} className="flex items-center justify-between px-3 py-1.5 bg-blue-50/60 rounded-lg text-xs">
+                                <span className="font-semibold text-slate-800">{s.studentId?.name || 'N/A'}</span>
+                                <span className="font-mono text-slate-500">{s.studentId?.rollNumber || ''}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -654,8 +695,8 @@ const TeacherDashboard = () => {
                   type="text"
                   value={customSubject}
                   onChange={(e) => setCustomSubject(e.target.value)}
-                  placeholder="e.g. Data Structures & Algorithms"
-                  className="w-full px-3 py-2 rounded-xl border border-blue-200 bg-blue-50/30 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter subject name"
+                  className="w-full px-3 py-2 rounded-xl border border-blue-200 bg-blue-50/30 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
                   required
                 />
               </div>
@@ -667,8 +708,8 @@ const TeacherDashboard = () => {
                     type="text"
                     value={customClass}
                     onChange={(e) => setCustomClass(e.target.value)}
-                    placeholder="CS-4A"
-                    className="w-full px-3 py-2 rounded-xl border border-blue-200 bg-blue-50/30 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter class (e.g. CS-4A)"
+                    className="w-full px-3 py-2 rounded-xl border border-blue-200 bg-blue-50/30 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
                     required
                   />
                 </div>
@@ -678,8 +719,8 @@ const TeacherDashboard = () => {
                     type="text"
                     value={customSection}
                     onChange={(e) => setCustomSection(e.target.value)}
-                    placeholder="A"
-                    className="w-full px-3 py-2 rounded-xl border border-blue-200 bg-blue-50/30 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter section (e.g. A)"
+                    className="w-full px-3 py-2 rounded-xl border border-blue-200 bg-blue-50/30 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
                     required
                   />
                 </div>
@@ -706,17 +747,20 @@ const TeacherDashboard = () => {
                     onChange={(e) => setSelectedRadius(Number(e.target.value))}
                     className="w-full px-3 py-2 rounded-xl border border-blue-200 bg-blue-50/30 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value={50}>50 Meters (Strict)</option>
-                    <option value={200}>200 Meters (Recommended)</option>
-                    <option value={500}>500 Meters (Wide Campus)</option>
+                    <option value={0}>No GPS</option>
+                    <option value={200}>200 Meters</option>
+                    <option value={500}>500 Meters</option>
+                    <option value={2000}>2 km</option>
                   </select>
                 </div>
               </div>
 
-              <div className="p-3 bg-blue-50/60 rounded-xl border border-blue-100 text-xs text-blue-800 flex items-start gap-2">
-                <MapPin className="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0" />
-                <p className="text-[11px] text-slate-600 leading-snug">
-                  GPS location will be automatically tagged to enforce classroom proximity.
+              <div className="p-3 bg-blue-50/60 rounded-xl border border-blue-100 text-xs flex items-start gap-2">
+                <MapPin className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
+                <p className="text-[11px] text-slate-500 leading-snug">
+                  {selectedRadius === 0
+                    ? 'GPS is OFF — students mark attendance with the code only, no location check.'
+                    : `Students must be within ${selectedRadius}m of your location to mark attendance.`}
                 </p>
               </div>
 

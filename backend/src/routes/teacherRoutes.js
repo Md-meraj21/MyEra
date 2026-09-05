@@ -6,6 +6,7 @@ const {
   startSession,
   extendSession,
   endSession,
+  deleteSession,
   getSessions,
   getSessionDetails,
   getReport,
@@ -23,5 +24,6 @@ router.get('/sessions/:id', verifyToken, requireRole(['teacher']), getSessions);
 router.get('/session/:sessionId', verifyToken, getSessionDetails);
 router.get('/report/:id', verifyToken, requireRole(['teacher']), getReport);
 router.get('/download/:id', downloadExcel); // allow direct download or token
+router.delete('/session/:sessionId', verifyToken, requireRole(['teacher']), deleteSession);
 
 module.exports = router;

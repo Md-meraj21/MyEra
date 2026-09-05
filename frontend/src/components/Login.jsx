@@ -221,7 +221,7 @@ const Login = ({ initialRole = 'student', onRoleChange, onSuccess }) => {
                 name="name"
                 value={formData.name}
                 onChange={handleInputChange}
-                placeholder={role === 'teacher' ? 'Prof. Amit Sharma' : 'Rahul Kumar'}
+                placeholder="Enter your full name"
                 className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-blue-100 bg-blue-50/30 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
                 required
               />
@@ -240,7 +240,7 @@ const Login = ({ initialRole = 'student', onRoleChange, onSuccess }) => {
               name="email"
               value={formData.email}
               onChange={handleInputChange}
-              placeholder={role === 'teacher' ? 'teacher@myera.edu' : 'student@myera.edu'}
+              placeholder="Enter your email address"
               className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-blue-100 bg-blue-50/30 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
               required
             />
