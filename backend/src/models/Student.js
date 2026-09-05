@@ -56,6 +56,10 @@ const studentSchema = new mongoose.Schema({
     required: [true, 'Section is required'],
     trim: true
   },
+  subjects: [{
+    type: String,
+    trim: true
+  }],
   attendance: [attendanceRecordSchema]
 }, {
   timestamps: true

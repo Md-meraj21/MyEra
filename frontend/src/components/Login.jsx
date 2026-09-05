@@ -1,14 +1,25 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { GraduationCap, UserCheck, Lock, Mail, User, BookOpen, Hash, ArrowRight, ShieldCheck } from 'lucide-react';
+import { 
+  GraduationCap, 
+  UserCheck, 
+  Lock, 
+  Mail, 
+  User, 
+  BookOpen, 
+  Hash, 
+  ArrowRight, 
+  AlertCircle,
+  CheckCircle2
+} from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { authAPI } from '../services/api';
 
-const Login = ({ initialRole = 'teacher', onSuccess }) => {
+const Login = ({ initialRole = 'student', onRoleChange, onSuccess }) => {
   const navigate = useNavigate();
   const { login } = useAuth();
 
-  const [role, setRole] = useState(initialRole); // 'teacher' | 'student'
+  const [role, setRole] = useState(initialRole); // 'student' | 'teacher'
   const [isRegister, setIsRegister] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -19,15 +30,64 @@ const Login = ({ initialRole = 'teacher', onSuccess }) => {
     name: '',
     email: '',
     password: '',
-    subject: '',
+    subject: 'Computer Science & Engineering',
     rollNumber: '',
-    class: '',
+    class: 'CS-4A',
     section: 'A'
   });
+
+  const handleRoleSwitch = (newRole) => {
+    setRole(newRole);
+    setErrorMessage('');
+    setSuccessMessage('');
+    if (onRoleChange) onRoleChange(newRole);
+  };
 
   const handleInputChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
     if (errorMessage) setErrorMessage('');
+  };
+
+  // Quick Demo Login Helper for seamless testing
+  const handleQuickDemo = async (demoRole) => {
+    setLoading(true);
+    setErrorMessage('');
+    setSuccessMessage('');
+    try {
+      const demoEmail = demoRole === 'teacher' ? 'teacher@myera.edu' : 'student@myera.edu';
+      const demoPass = 'password123';
+      
+      let res;
+      if (demoRole === 'teacher') {
+        res = await authAPI.teacherLogin({ email: demoEmail, password: demoPass });
+      } else {
+        res = await authAPI.studentLogin({ email: demoEmail, password: demoPass });
+      }
+
+      const { token, user, message } = res.data;
+      login(token, user);
+      setSuccessMessage(message || 'Welcome back!');
+
+      if (onSuccess) {
+        onSuccess(user);
+      } else {
+        navigate(user.role === 'teacher' ? '/teacher' : '/student');
+      }
+    } catch (err) {
+      // If demo account doesn't exist, autofill form
+      setFormData(prev => ({
+        ...prev,
+        email: demoRole === 'teacher' ? 'teacher@myera.edu' : 'student@myera.edu',
+        password: 'password123',
+        name: demoRole === 'teacher' ? 'Prof. Amit Sharma' : 'Rahul Kumar',
+        rollNumber: 'CS2024-042',
+        class: 'CS-4A',
+        section: 'A'
+      }));
+      setErrorMessage('Enter details and click Register to create your account.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -72,20 +132,16 @@ const Login = ({ initialRole = 'teacher', onSuccess }) => {
 
       const { token, user, message } = res.data;
       login(token, user);
-      setSuccessMessage(message || 'Authentication successful!');
+      setSuccessMessage(message || 'Welcome to MyEra!');
 
       if (onSuccess) {
         onSuccess(user);
       } else {
-        if (user.role === 'teacher') {
-          navigate('/teacher');
-        } else {
-          navigate('/student');
-        }
+        navigate(user.role === 'teacher' ? '/teacher' : '/student');
       }
     } catch (err) {
       console.error('Auth error:', err);
-      const msg = err.response?.data?.message || 'Authentication failed. Please check your credentials.';
+      const msg = err.response?.data?.message || 'Authentication failed. Please verify credentials.';
       setErrorMessage(msg);
     } finally {
       setLoading(false);
@@ -93,58 +149,60 @@ const Login = ({ initialRole = 'teacher', onSuccess }) => {
   };
 
   return (
-    <div className="w-full max-w-md mx-auto bg-white rounded-3xl shadow-xl shadow-slate-200/60 border border-slate-100 p-7 sm:p-8">
-      {/* Role Selection Tabs */}
-      <div className="flex bg-slate-100 p-1.5 rounded-2xl mb-6">
+    <div className="card-human rounded-3xl p-6 sm:p-8 space-y-6">
+      {/* Role Toggle Tabs */}
+      <div className="flex bg-blue-50/80 p-1 rounded-2xl border border-blue-100">
         <button
           type="button"
-          onClick={() => { setRole('teacher'); setErrorMessage(''); }}
-          className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
-            role === 'teacher'
-              ? 'bg-white text-emerald-700 shadow-sm'
-              : 'text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <UserCheck className="w-4 h-4" />
-          Teacher Portal
-        </button>
-        <button
-          type="button"
-          onClick={() => { setRole('student'); setErrorMessage(''); }}
-          className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+          onClick={() => handleRoleSwitch('student')}
+          className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
             role === 'student'
-              ? 'bg-white text-indigo-700 shadow-sm'
-              : 'text-slate-500 hover:text-slate-800'
+              ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+              : 'text-slate-600 hover:text-blue-700'
           }`}
         >
           <GraduationCap className="w-4 h-4" />
-          Student Portal
+          <span>Student</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => handleRoleSwitch('teacher')}
+          className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+            role === 'teacher'
+              ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+              : 'text-slate-600 hover:text-blue-700'
+          }`}
+        >
+          <UserCheck className="w-4 h-4" />
+          <span>Teacher</span>
         </button>
       </div>
 
-      {/* Header */}
-      <div className="text-center mb-6">
-        <h2 className="text-2xl font-black text-slate-900 tracking-tight">
-          {isRegister ? `Create ${role === 'teacher' ? 'Teacher' : 'Student'} Account` : `Sign in as ${role === 'teacher' ? 'Teacher' : 'Student'}`}
+      {/* Title */}
+      <div>
+        <h2 className="text-xl font-black text-slate-900 tracking-tight">
+          {isRegister
+            ? `Register as ${role === 'teacher' ? 'Teacher' : 'Student'}`
+            : `${role === 'teacher' ? 'Teacher' : 'Student'} Sign In`}
         </h2>
         <p className="text-xs text-slate-500 mt-1">
           {isRegister
-            ? 'Join MyEra to start taking smart attendance with GPS verification.'
-            : 'Enter your credentials to access your personal dashboard.'}
+            ? 'Fill in your details below to create your account.'
+            : 'Enter your email and password to access your dashboard.'}
         </p>
       </div>
 
       {/* Alerts */}
       {errorMessage && (
-        <div className="mb-5 p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-xs font-semibold text-rose-700 flex items-start gap-2">
-          <span>⚠️</span>
+        <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl text-xs font-semibold text-rose-700 flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0" />
           <span>{errorMessage}</span>
         </div>
       )}
 
       {successMessage && (
-        <div className="mb-5 p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs font-semibold text-emerald-700 flex items-start gap-2">
-          <ShieldCheck className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+        <div className="p-3 bg-blue-50 border border-blue-200 rounded-2xl text-xs font-semibold text-blue-700 flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-blue-600 flex-shrink-0" />
           <span>{successMessage}</span>
         </div>
       )}
@@ -153,7 +211,7 @@ const Login = ({ initialRole = 'teacher', onSuccess }) => {
       <form onSubmit={handleSubmit} className="space-y-4">
         {isRegister && (
           <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+            <label className="block text-xs font-bold text-slate-700 mb-1.5">
               Full Name
             </label>
             <div className="relative">
@@ -163,8 +221,8 @@ const Login = ({ initialRole = 'teacher', onSuccess }) => {
                 name="name"
                 value={formData.name}
                 onChange={handleInputChange}
-                placeholder="Dr. Sarah Johnson"
-                className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+                placeholder={role === 'teacher' ? 'Prof. Amit Sharma' : 'Rahul Kumar'}
+                className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-blue-100 bg-blue-50/30 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
                 required
               />
             </div>
@@ -172,7 +230,7 @@ const Login = ({ initialRole = 'teacher', onSuccess }) => {
         )}
 
         <div>
-          <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+          <label className="block text-xs font-bold text-slate-700 mb-1.5">
             Email Address
           </label>
           <div className="relative">
@@ -183,14 +241,14 @@ const Login = ({ initialRole = 'teacher', onSuccess }) => {
               value={formData.email}
               onChange={handleInputChange}
               placeholder={role === 'teacher' ? 'teacher@myera.edu' : 'student@myera.edu'}
-              className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+              className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-blue-100 bg-blue-50/30 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
               required
             />
           </div>
         </div>
 
         <div>
-          <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+          <label className="block text-xs font-bold text-slate-700 mb-1.5">
             Password
           </label>
           <div className="relative">
@@ -201,17 +259,17 @@ const Login = ({ initialRole = 'teacher', onSuccess }) => {
               value={formData.password}
               onChange={handleInputChange}
               placeholder="••••••••"
-              className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+              className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-blue-100 bg-blue-50/30 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
               required
               minLength={6}
             />
           </div>
         </div>
 
-        {/* Role Specific Registration Fields */}
+        {/* Role-Specific Fields during Registration */}
         {isRegister && role === 'teacher' && (
           <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+            <label className="block text-xs font-bold text-slate-700 mb-1.5">
               Primary Subject / Department
             </label>
             <div className="relative">
@@ -222,7 +280,7 @@ const Login = ({ initialRole = 'teacher', onSuccess }) => {
                 value={formData.subject}
                 onChange={handleInputChange}
                 placeholder="Computer Science & Engineering"
-                className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+                className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-blue-100 bg-blue-50/30 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
                 required
               />
             </div>
@@ -232,7 +290,7 @@ const Login = ({ initialRole = 'teacher', onSuccess }) => {
         {isRegister && role === 'student' && (
           <>
             <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">
                 Roll Number
               </label>
               <div className="relative">
@@ -243,7 +301,7 @@ const Login = ({ initialRole = 'teacher', onSuccess }) => {
                   value={formData.rollNumber}
                   onChange={handleInputChange}
                   placeholder="CS2024-042"
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-blue-100 bg-blue-50/30 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
                   required
                 />
               </div>
@@ -251,7 +309,7 @@ const Login = ({ initialRole = 'teacher', onSuccess }) => {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
                   Class / Branch
                 </label>
                 <input
@@ -260,12 +318,12 @@ const Login = ({ initialRole = 'teacher', onSuccess }) => {
                   value={formData.class}
                   onChange={handleInputChange}
                   placeholder="CS-4A"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-blue-100 bg-blue-50/30 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
                   required
                 />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
                   Section
                 </label>
                 <input
@@ -274,37 +332,37 @@ const Login = ({ initialRole = 'teacher', onSuccess }) => {
                   value={formData.section}
                   onChange={handleInputChange}
                   placeholder="A"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-blue-100 bg-blue-50/30 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
                   required
                 />
               </div>
             </div>
+
+
           </>
         )}
 
-        {/* Submit Button */}
+        {/* Submit Action */}
         <button
           type="submit"
           disabled={loading}
-          className={`w-full mt-2 py-3 px-4 rounded-xl text-white font-bold text-sm flex items-center justify-center gap-2 transition-all shadow-md active:scale-95 disabled:opacity-50 ${
-            role === 'teacher'
-              ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/25'
-              : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/25'
-          }`}
+          className="w-full py-3 px-4 rounded-xl btn-bright-blue font-bold text-sm flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50"
         >
           {loading ? (
             <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
           ) : (
             <>
-              <span>{isRegister ? 'Complete Registration' : 'Sign In Now'}</span>
+              <span>{isRegister ? 'Complete Registration' : 'Sign In'}</span>
               <ArrowRight className="w-4 h-4" />
             </>
           )}
         </button>
       </form>
 
+
+
       {/* Switch between Sign In and Sign Up */}
-      <div className="text-center mt-6 pt-5 border-t border-slate-100">
+      <div className="text-center pt-2">
         <button
           type="button"
           onClick={() => {
@@ -312,12 +370,12 @@ const Login = ({ initialRole = 'teacher', onSuccess }) => {
             setErrorMessage('');
             setSuccessMessage('');
           }}
-          className="text-xs font-semibold text-slate-600 hover:text-slate-900 transition"
+          className="text-xs font-semibold text-slate-600 hover:text-blue-700 transition"
         >
           {isRegister ? (
-            <span>Already have an account? <strong className="text-emerald-600 underline">Sign In</strong></span>
+            <span>Already have an account? <strong className="text-blue-600 underline">Sign In</strong></span>
           ) : (
-            <span>Don't have an account yet? <strong className="text-emerald-600 underline">Register here</strong></span>
+            <span>New to MyEra? <strong className="text-blue-600 underline">Create Account</strong></span>
           )}
         </button>
       </div>

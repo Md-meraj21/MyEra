@@ -248,6 +248,23 @@ exports.getAttendanceStrip = async (req, res) => {
     // Subject-wise calculation
     const subjectStatsMap = new Map();
 
+    // Default multi-subject portfolio if student has subjects or for curriculum
+    const defaultCurriculum = [
+      'Data Structures & Algorithms',
+      'Operating Systems',
+      'Database Management Systems',
+      'Computer Networks',
+      'Software Engineering'
+    ];
+
+    const studentEnrolledSubjects = student.subjects && student.subjects.length > 0 
+      ? student.subjects 
+      : defaultCurriculum;
+
+    studentEnrolledSubjects.forEach((subj) => {
+      subjectStatsMap.set(subj, { total: 0, present: 0 });
+    });
+
     // Group total sessions by subject
     totalSessions.forEach((sess) => {
       const subj = sess.subject;
@@ -270,7 +287,7 @@ exports.getAttendanceStrip = async (req, res) => {
 
     const subjectStrips = [];
     subjectStatsMap.forEach((val, subject) => {
-      const pct = val.total > 0 ? Math.round((val.present / val.total) * 100) : 0;
+      const pct = val.total > 0 ? Math.round((val.present / val.total) * 100) : (val.present > 0 ? 100 : 0);
       const meta = getStatusMeta(pct);
       subjectStrips.push({
         subject,
@@ -279,8 +296,8 @@ exports.getAttendanceStrip = async (req, res) => {
         absentClasses: Math.max(0, val.total - val.present),
         percentage: pct,
         color: meta.color,
-        status: meta.status,
-        badgeBg: meta.badgeBg
+        status: val.total === 0 ? 'Upcoming' : meta.status,
+        badgeBg: val.total === 0 ? 'bg-sky-100 text-sky-800 border-sky-200' : meta.badgeBg
       });
     });
 
@@ -291,7 +308,8 @@ exports.getAttendanceStrip = async (req, res) => {
         name: student.name,
         rollNumber: student.rollNumber,
         class: student.class,
-        section: student.section
+        section: student.section,
+        subjects: studentEnrolledSubjects
       },
       overall: {
         totalSessions: totalSessionsCount || student.attendance.length,
