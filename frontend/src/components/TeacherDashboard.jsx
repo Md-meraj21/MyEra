@@ -55,6 +55,8 @@ const TeacherDashboard = () => {
   });
 
   const [showLaunchModal, setShowLaunchModal] = useState(false);
+  const [sessionToDelete, setSessionToDelete] = useState(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [customSubject, setCustomSubject] = useState('');
   const [customClass, setCustomClass] = useState('CS-4A');
@@ -318,14 +320,27 @@ const TeacherDashboard = () => {
     }
   };
 
-  const handleDeleteSession = async (sessionId) => {
-    if (!window.confirm('Delete this session from history? This cannot be undone.')) return;
+  const handleDeleteClick = (session) => {
+    setSessionToDelete(session);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!sessionToDelete) return;
+    const sessId = sessionToDelete._id || sessionToDelete.id;
     try {
-      await teacherAPI.deleteSession(sessionId);
-      setSessions(prev => prev.filter(s => (s._id || s.id) !== sessionId));
+      setDeleteLoading(true);
+      await teacherAPI.deleteSession(sessId);
+      setSessions(prev => prev.filter(s => (s._id || s.id) !== sessId));
       showStatus({ type: 'success', text: 'Session removed from history.' });
+      setSessionToDelete(null);
     } catch (err) {
-      showStatus({ type: 'error', text: 'Failed to delete session.' });
+      console.error('Delete session error:', err);
+      showStatus({
+        type: 'error',
+        text: err.response?.data?.message || 'Failed to delete session. Please try again.'
+      });
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -634,7 +649,7 @@ const TeacherDashboard = () => {
                           <Download className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={() => handleDeleteSession(sessId)}
+                          onClick={() => handleDeleteClick(sess)}
                           className="p-2 rounded-xl text-rose-500 hover:bg-rose-50 border border-rose-100 transition"
                           title="Delete from history"
                         >
@@ -781,6 +796,53 @@ const TeacherDashboard = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {sessionToDelete && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="card-human bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in duration-200">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-100 flex items-center justify-center text-rose-600 mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+
+            <div className="text-center space-y-1">
+              <h3 className="text-base font-extrabold text-slate-900">Delete Session?</h3>
+              <p className="text-xs text-slate-500">
+                Are you sure you want to remove <strong className="text-slate-800">{sessionToDelete.subject}</strong> ({sessionToDelete.class}-{sessionToDelete.section}) from history?
+              </p>
+              <p className="text-[11px] text-rose-500 font-medium pt-1">
+                This action cannot be undone and deletes all attendance records for this lecture.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setSessionToDelete(null)}
+                disabled={deleteLoading}
+                className="flex-1 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 border border-slate-200 transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                disabled={deleteLoading}
+                className="flex-1 py-2.5 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 shadow-sm transition disabled:opacity-50 flex items-center justify-center gap-1.5"
+              >
+                {deleteLoading ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <span>Delete</span>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

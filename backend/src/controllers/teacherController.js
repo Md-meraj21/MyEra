@@ -282,7 +282,7 @@ exports.endSession = async (req, res) => {
 exports.deleteSession = async (req, res) => {
   try {
     const { sessionId } = req.params;
-    const teacherId = req.user?.id;
+    const teacherId = req.user?.id || req.user?._id;
 
     if (!sessionId || !mongoose.Types.ObjectId.isValid(sessionId)) {
       return res.status(400).json({
@@ -300,7 +300,10 @@ exports.deleteSession = async (req, res) => {
 
     const session = await Session.findOneAndDelete({
       _id: new mongoose.Types.ObjectId(sessionId),
-      teacherId: new mongoose.Types.ObjectId(teacherId)
+      $or: [
+        { teacherId: teacherId },
+        { teacherId: new mongoose.Types.ObjectId(teacherId) }
+      ]
     });
 
     if (!session) {
