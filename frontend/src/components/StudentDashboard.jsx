@@ -20,6 +20,7 @@ import { useAuth } from '../context/AuthContext';
 import { studentAPI, teacherAPI } from '../services/api';
 import AttendanceStrip from './AttendanceStrip';
 import Timetable from './Timetable';
+import NotificationPrompt from './NotificationPrompt';
 
 const StudentDashboard = () => {
   const { user, logout } = useAuth();
@@ -240,6 +241,9 @@ const StudentDashboard = () => {
 
       {/* Main Content Area */}
       <main className="max-w-4xl mx-auto px-4 sm:px-6 pt-5 sm:pt-6">
+        {/* Class Reminder Notification Prompt */}
+        <NotificationPrompt user={user} role="student" />
+
         {/* Status Message Notification */}
         {statusMessage && (
           <div

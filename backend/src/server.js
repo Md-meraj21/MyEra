@@ -15,6 +15,8 @@ try {
 const authRoutes = require('./routes/authRoutes');
 const teacherRoutes = require('./routes/teacherRoutes');
 const studentRoutes = require('./routes/studentRoutes');
+const notificationRoutes = require('./routes/notificationRoutes');
+const { startReminderScheduler } = require('./services/reminderScheduler');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -43,6 +45,7 @@ if (process.env.NODE_ENV !== 'production') {
 app.use('/api/auth', authRoutes);
 app.use('/api/teacher', teacherRoutes);
 app.use('/api/student', studentRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // Health check endpoint
 app.get('/', (req, res) => {
@@ -110,6 +113,9 @@ const connectDB = async () => {
       }
     }
   }
+
+  // Start background class timetable 5-minute reminder scheduler
+  startReminderScheduler();
 };
 
 connectDB();

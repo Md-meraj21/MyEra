@@ -58,7 +58,11 @@ const teacherSchema = new mongoose.Schema({
     required: [true, 'Primary subject is required'],
     trim: true
   },
-  timetable: [timetableEntrySchema]
+  timetable: [timetableEntrySchema],
+  notificationTokens: [{
+    type: String,
+    trim: true
+  }]
 }, {
   timestamps: true
 });

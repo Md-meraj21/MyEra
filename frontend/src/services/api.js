@@ -66,4 +66,9 @@ export const studentAPI = {
   getAttendanceHistory: (studentId) => api.get(`/student/history/${studentId}`),
 };
 
+export const notificationAPI = {
+  saveToken: (data) => api.post('/notifications/save-token', data),
+  testReminder: (data) => api.post('/notifications/test-reminder', data),
+};
+
 export default api;

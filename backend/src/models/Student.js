@@ -60,7 +60,11 @@ const studentSchema = new mongoose.Schema({
     type: String,
     trim: true
   }],
-  attendance: [attendanceRecordSchema]
+  attendance: [attendanceRecordSchema],
+  notificationTokens: [{
+    type: String,
+    trim: true
+  }]
 }, {
   timestamps: true
 });

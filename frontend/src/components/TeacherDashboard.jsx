@@ -21,6 +21,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { teacherAPI } from '../services/api';
 import Timetable from './Timetable';
+import NotificationPrompt from './NotificationPrompt';
 
 const TeacherDashboard = () => {
   const { user, logout } = useAuth();
@@ -417,6 +418,9 @@ const TeacherDashboard = () => {
 
       {/* Main Content Area */}
       <main className="max-w-5xl mx-auto px-4 sm:px-6 pt-5 sm:pt-6">
+        {/* Class Reminder Notification Prompt */}
+        <NotificationPrompt user={user} role="teacher" />
+
         {/* Status Message */}
         {statusMessage && (
           <div
