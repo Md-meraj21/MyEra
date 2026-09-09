@@ -37,6 +37,93 @@ const Timetable = ({ timetable = [], onSaveTimetable, onStartSession, isTeacher 
     (item) => item.day.toLowerCase() === selectedDay.toLowerCase()
   ).sort((a, b) => a.period - b.period);
 
+  // Helper to parse start time string (e.g. "10:30 PM - 10:40 PM")
+  const parseStartMinutes = (timeString) => {
+    if (!timeString || typeof timeString !== 'string') return null;
+    try {
+      const firstPart = timeString.split('-')[0].trim();
+      const match = firstPart.match(/^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i);
+      if (!match) return null;
+      let hours = parseInt(match[1], 10);
+      const minutes = parseInt(match[2], 10);
+      const meridian = match[3] ? match[3].toUpperCase() : null;
+      if (meridian === 'PM' && hours < 12) hours += 12;
+      else if (meridian === 'AM' && hours === 12) hours = 0;
+      return hours * 60 + minutes;
+    } catch {
+      return null;
+    }
+  };
+
+  // Automated 5-Minute Class Reminder Watcher (Runs every 30 seconds)
+  useEffect(() => {
+    if (!timetable || timetable.length === 0) return;
+
+    const checkUpcomingPeriods = () => {
+      const now = new Date();
+      const todayName = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(now);
+      const currentMinutes = now.getHours() * 60 + now.getMinutes();
+      const dateStr = now.toISOString().slice(0, 10);
+
+      const todaySlots = timetable.filter((t) => {
+        const d = (t.day || '').toLowerCase();
+        return d === todayName.toLowerCase() || todayName.toLowerCase().startsWith(d);
+      });
+
+      todaySlots.forEach((slot) => {
+        const startMinutes = parseStartMinutes(slot.time);
+        if (startMinutes === null) return;
+
+        const diff = startMinutes - currentMinutes;
+        // Trigger alert if class starts in 0 to 5 minutes
+        if (diff >= 0 && diff <= 5) {
+          const sessionKey = `myera_auto_alert_${dateStr}_${slot.day}_${slot.period}_${slot.subject}_${slot.class}`;
+          if (sessionStorage.getItem(sessionKey)) return;
+          sessionStorage.setItem(sessionKey, 'true');
+
+          const diffText = diff === 0 ? 'Starting right now!' : `Starting in ${diff} minute${diff > 1 ? 's' : ''}!`;
+
+          // 1. Native Desktop/Mobile Push Notification
+          if ('Notification' in window && Notification.permission === 'granted') {
+            try {
+              new Notification(`⏰ Upcoming Class: ${slot.subject}`, {
+                body: `${slot.class} (${slot.section || 'A'}) • ${diffText}`,
+                icon: '/favicon.ico',
+                badge: '/favicon.ico'
+              });
+            } catch (err) {
+              console.warn('Native notification notice:', err);
+            }
+          }
+
+          // 2. In-App Banner
+          setNotifyToast({
+            type: 'success',
+            text: `⏰ Auto Alert: "${slot.subject}" (${slot.class}) is ${diffText}`
+          });
+
+          // 3. If teacher, trigger student reminder in background
+          if (isTeacher && user) {
+            notificationAPI.sendClassReminder({
+              subject: slot.subject,
+              class: slot.class,
+              section: slot.section,
+              period: slot.period,
+              time: slot.time,
+              teacherId: user?._id || user?.id,
+              teacherName: user?.name,
+              teacherEmail: user?.email
+            }).catch((e) => console.warn('Auto background reminder error:', e.message));
+          }
+        }
+      });
+    };
+
+    checkUpcomingPeriods();
+    const interval = setInterval(checkUpcomingPeriods, 30000);
+    return () => clearInterval(interval);
+  }, [timetable, isTeacher, user]);
+
   const handleAddEntry = async (e) => {
     e.preventDefault();
     if (!formData.subject || !formData.class || !formData.section) {

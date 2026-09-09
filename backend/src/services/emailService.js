@@ -59,12 +59,11 @@ const sendClassReminderEmail = async ({
   teacherName = ''
 }) => {
   try {
-    const transport = getTransporter();
     const senderEmail = process.env.SMTP_USER || 'no-reply@myera.internal';
     const fromAddress = `"MyEra Smart Classroom" <${senderEmail}>`;
     const frontendUrl = process.env.FRONTEND_URL || 'https://myera-eight.vercel.app';
 
-    if (!transport) {
+    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
       console.log(`ℹ️ [EmailService (Dry Run)]: Reminder for "${subject}" (${className}-${section}) ready for ${to}, but SMTP is unconfigured in .env.`);
       return { success: false, reason: 'unconfigured' };
     }
@@ -151,10 +150,55 @@ const sendClassReminderEmail = async ({
     </html>
     `;
 
+    const emailSubject = `⏰ [Reminder] ${subject} starts in 5 minutes (${time})`;
+
+    // 1. Try Vercel HTTPS Email Relay (Bypasses Render's outbound SMTP port blocking over port 443)
+    if (frontendUrl && (process.env.SMTP_USER || process.env.SMTP_PASS)) {
+      try {
+        const relayController = new AbortController();
+        const relayTimer = setTimeout(() => relayController.abort(), 10000);
+
+        const relayRes = await fetch(`${frontendUrl}/api/send-email`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to,
+            subject: emailSubject,
+            html: htmlContent,
+            from: fromAddress,
+            senderEmail,
+            auth: {
+              user: process.env.SMTP_USER,
+              pass: process.env.SMTP_PASS
+            }
+          }),
+          signal: relayController.signal
+        });
+        clearTimeout(relayTimer);
+
+        if (relayRes.ok) {
+          const relayData = await relayRes.json();
+          if (relayData.success) {
+            console.log(`✅ [EmailService (HTTPS Relay)] Reminder sent to ${to} for ${subject} (MessageId: ${relayData.messageId})`);
+            return { success: true, messageId: relayData.messageId };
+          }
+        }
+      } catch (relayErr) {
+        console.warn(`ℹ️ [EmailService] HTTPS Relay skipped/unavailable (${relayErr.message}), falling back to direct transport...`);
+      }
+    }
+
+    // 2. Direct Nodemailer fallback
+    const transport = getTransporter();
+    if (!transport) {
+      console.log(`ℹ️ [EmailService (Dry Run)]: Reminder for "${subject}" (${className}-${section}) ready for ${to}, but SMTP is unconfigured in .env.`);
+      return { success: false, reason: 'unconfigured' };
+    }
+
     const info = await transport.sendMail({
       from: fromAddress,
       to,
-      subject: `⏰ [Reminder] ${subject} starts in 5 minutes (${time})`,
+      subject: emailSubject,
       html: htmlContent
     });
 

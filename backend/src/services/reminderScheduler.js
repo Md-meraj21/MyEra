@@ -74,9 +74,10 @@ const processClassReminders = async () => {
     const dateKey = now.toISOString().slice(0, 10);
     pruneOldCache(dateKey);
 
-    // 3. Find teachers who have classes scheduled today
+    // 3. Find teachers who have classes scheduled today (matches "Wednesday" or "Wed")
+    const dayPrefix = currentDay.slice(0, 3);
     const teachers = await Teacher.find({
-      'timetable.day': { $regex: new RegExp(`^${currentDay}$`, 'i') }
+      'timetable.day': { $regex: new RegExp(`^(${currentDay}|${dayPrefix})`, 'i') }
     }).select('name email timetable notificationTokens');
 
     if (!teachers || teachers.length === 0) {
@@ -84,18 +85,19 @@ const processClassReminders = async () => {
     }
 
     for (const teacher of teachers) {
-      const todayEntries = (teacher.timetable || []).filter(
-        (entry) => entry.day.toLowerCase() === currentDay.toLowerCase()
-      );
+      const todayEntries = (teacher.timetable || []).filter((entry) => {
+        const d = (entry.day || '').toLowerCase();
+        return d === currentDay.toLowerCase() || d === dayPrefix.toLowerCase() || currentDay.toLowerCase().startsWith(d);
+      });
 
       for (const entry of todayEntries) {
         const classStartMinutes = parseStartTimeToMinutes(entry.time);
         if (classStartMinutes === null) continue;
 
-        // Reminder condition: 4 to 6 minutes before class start
+        // Reminder condition: upcoming within the next 6 minutes (0 to 6 minutes before start)
         const diffMinutes = classStartMinutes - currentTotalMinutes;
 
-        if (diffMinutes >= 4 && diffMinutes <= 6) {
+        if (diffMinutes >= 0 && diffMinutes <= 6) {
           const dedupeKey = `${teacher._id}_${entry.day}_${entry.period}_${entry.class}_${entry.section}_${dateKey}`;
 
           if (sentRemindersCache.has(dedupeKey)) {
