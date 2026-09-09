@@ -13,7 +13,7 @@ const DEFAULT_SAMPLE_TIMETABLE = [
   { day: 'Friday', period: 4, subject: 'Discrete Mathematics', class: 'CS-4A', section: 'A', time: '01:30 PM - 02:30 PM' },
 ];
 
-const Timetable = ({ timetable = [], onSaveTimetable, onStartSession, isTeacher = false }) => {
+const Timetable = ({ timetable = [], onSaveTimetable, onStartSession, isTeacher = false, user = null }) => {
   const currentDayName = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(new Date());
   const [selectedDay, setSelectedDay] = useState(DAYS.includes(currentDayName) ? currentDayName : 'Monday');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -99,20 +99,29 @@ const Timetable = ({ timetable = [], onSaveTimetable, onStartSession, isTeacher 
         class: slot.class,
         section: slot.section,
         period: slot.period,
-        time: slot.time
+        time: slot.time,
+        teacherId: user?._id || user?.id,
+        teacherName: user?.name,
+        teacherEmail: user?.email
       });
+
+      const count = res.data?.studentCount || 0;
+      const pushCount = res.data?.pushTokensCount || 0;
+      const pushMsg = pushCount > 0 
+        ? ` • 📱 ${pushCount} Push alert(s) sent`
+        : ` • ℹ️ Students haven't enabled push notifications on their phones yet`;
 
       setNotifyToast({
         type: 'success',
-        text: res.data?.message || `🚀 5-min alert dispatched to students for ${slot.subject}!`
+        text: `📧 Reminder for "${slot.subject}" sent to ${count} student(s) & your email!${pushMsg}`
       });
-      setTimeout(() => setNotifyToast(null), 5000);
+      setTimeout(() => setNotifyToast(null), 8000);
     } catch (err) {
       setNotifyToast({
         type: 'error',
         text: err.response?.data?.message || err.message || 'Failed to send class reminder to students.'
       });
-      setTimeout(() => setNotifyToast(null), 5000);
+      setTimeout(() => setNotifyToast(null), 8000);
     } finally {
       setNotifyingIdx(null);
     }

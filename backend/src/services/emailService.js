@@ -7,8 +7,10 @@ let transporter = null;
  */
 const getTransporter = () => {
   const host = process.env.SMTP_HOST || 'smtp.gmail.com';
-  // Use port 465 with SSL as default for reliable delivery on Render / cloud containers
-  const port = parseInt(process.env.SMTP_PORT || '465', 10);
+  const isGmail = host.toLowerCase().includes('gmail.com');
+  // Cloud providers like Render block port 587 / STARTTLS. For Gmail, always enforce port 465 SSL.
+  const port = isGmail ? 465 : parseInt(process.env.SMTP_PORT || '465', 10);
+  const secure = port === 465 || isGmail;
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
 
@@ -20,15 +22,15 @@ const getTransporter = () => {
     transporter = nodemailer.createTransport({
       host,
       port,
-      secure: port === 465, // true for 465 SSL, false for 587 STARTTLS
+      secure,
       auth: {
         user,
         pass
       },
       family: 4, // Force IPv4 to prevent ENETUNREACH on Render
-      connectionTimeout: 10000,
-      greetingTimeout: 10000,
-      socketTimeout: 15000
+      connectionTimeout: 15000,
+      greetingTimeout: 15000,
+      socketTimeout: 20000
     });
   }
 

@@ -576,6 +576,7 @@ const TeacherDashboard = () => {
                     onSaveTimetable={handleSaveTimetable}
                     onStartSession={openLaunchModalForSlot}
                     isTeacher={true}
+                    user={user}
                   />
                 </div>
               </div>
@@ -601,6 +602,7 @@ const TeacherDashboard = () => {
               onSaveTimetable={handleSaveTimetable}
               onStartSession={openLaunchModalForSlot}
               isTeacher={true}
+              user={user}
             />
           </div>
         )}
