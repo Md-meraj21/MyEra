@@ -106,22 +106,33 @@ const Timetable = ({ timetable = [], onSaveTimetable, onStartSession, isTeacher 
       });
 
       const count = res.data?.studentCount || 0;
+      const successfulEmails = res.data?.successfulEmails ?? count;
+      const teacherEmailSuccess = res.data?.teacherEmailSuccess ?? true;
       const pushCount = res.data?.pushTokensCount || 0;
+      const emailWarning = res.data?.emailWarning;
+
       const pushMsg = pushCount > 0 
         ? ` • 📱 ${pushCount} Push alert(s) sent`
-        : ` • ℹ️ Students haven't enabled push notifications on their phones yet`;
+        : ` • ℹ️ Students have not opened the app to enable push notifications yet`;
 
-      setNotifyToast({
-        type: 'success',
-        text: `📧 Reminder for "${slot.subject}" sent to ${count} student(s) & your email!${pushMsg}`
-      });
-      setTimeout(() => setNotifyToast(null), 8000);
+      if (emailWarning && successfulEmails === 0) {
+        setNotifyToast({
+          type: 'error',
+          text: `⚠️ Found ${count} student(s), but email delivery error: ${emailWarning}${pushMsg}`
+        });
+      } else {
+        setNotifyToast({
+          type: 'success',
+          text: `📧 Reminder for "${slot.subject}" delivered to ${successfulEmails} student(s)${teacherEmailSuccess ? ' & your email' : ''}!${pushMsg}`
+        });
+      }
+      setTimeout(() => setNotifyToast(null), 10000);
     } catch (err) {
       setNotifyToast({
         type: 'error',
         text: err.response?.data?.message || err.message || 'Failed to send class reminder to students.'
       });
-      setTimeout(() => setNotifyToast(null), 8000);
+      setTimeout(() => setNotifyToast(null), 10000);
     } finally {
       setNotifyingIdx(null);
     }

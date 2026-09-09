@@ -1,19 +1,106 @@
-import React, { useState, useEffect } from 'react';
-import { Bell, BellRing, CheckCircle, AlertCircle, Sparkles, Send } from 'lucide-react';
-import { requestNotificationPermissionAndToken, isFirebaseConfigured } from '../services/firebase';
+import React, { useState, useEffect, useRef } from 'react';
+import { Bell, BellRing, CheckCircle, AlertCircle, Sparkles, Send, Smartphone, Mail, RefreshCw } from 'lucide-react';
+import { requestNotificationPermissionAndToken, onForegroundMessage } from '../services/firebase';
 import { notificationAPI } from '../services/api';
 
 const NotificationPrompt = ({ user, role = 'student' }) => {
   const [permission, setPermission] = useState('default');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isTokenSynced, setIsTokenSynced] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [statusMsg, setStatusMsg] = useState(null);
   const [testLoading, setTestLoading] = useState(false);
   const [dismissed, setDismissed] = useState(false);
+  const syncAttemptedRef = useRef(false);
 
-  useEffect(() => {
-    if ('Notification' in window) {
-      setPermission(Notification.permission);
+  // Sync token to database for the current logged-in user
+  const syncDeviceToken = async (showSuccessMsg = false) => {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return null;
+    setIsSyncing(true);
+
+    try {
+      const res = await requestNotificationPermissionAndToken();
+      if (res.success && res.token) {
+        localStorage.setItem('myera_fcm_token', res.token);
+
+        await notificationAPI.saveToken({
+          token: res.token,
+          role,
+          userId: user?._id || user?.id,
+          email: user?.email
+        });
+
+        setIsTokenSynced(true);
+        if (showSuccessMsg) {
+          setStatusMsg({
+            type: 'success',
+            text: '🎉 Push notification token connected to your account! You will receive alerts 5 mins before scheduled classes.'
+          });
+        }
+        return res.token;
+      } else {
+        console.warn('FCM token generation notice:', res.message);
+        return null;
+      }
+    } catch (err) {
+      console.warn('Token sync warning:', err.message);
+      return null;
+    } finally {
+      setIsSyncing(false);
     }
+  };
+
+  // Check initial browser permission and auto-sync token on load/login
+  useEffect(() => {
+    if (!('Notification' in window)) return;
+
+    const currentPerm = Notification.permission;
+    setPermission(currentPerm);
+
+    const hasStoredToken = Boolean(localStorage.getItem('myera_fcm_token'));
+    if (hasStoredToken) {
+      setIsTokenSynced(true);
+    }
+
+    // If permission is already granted, auto-register token in MongoDB for this user
+    if (currentPerm === 'granted' && (user?._id || user?.id || user?.email) && !syncAttemptedRef.current) {
+      syncAttemptedRef.current = true;
+      syncDeviceToken(false);
+    }
+  }, [user?._id, user?.id, user?.email]);
+
+  // Foreground notification handler (when tab is active)
+  useEffect(() => {
+    let unsubscribe = null;
+    onForegroundMessage((payload) => {
+      const title = payload.notification?.title || payload.data?.title || '⏰ MyEra Class Alert';
+      const body = payload.notification?.body || payload.data?.body || 'Your scheduled lecture is starting in 5 minutes!';
+
+      // Display HTML5 Notification if supported
+      if ('Notification' in window && Notification.permission === 'granted') {
+        try {
+          new Notification(title, {
+            body,
+            icon: '/favicon.ico',
+            badge: '/favicon.ico'
+          });
+        } catch (e) {
+          // Fallback if Notification constructor restricted
+        }
+      }
+
+      // Show in-app banner
+      setStatusMsg({
+        type: 'success',
+        text: `🔔 ${title}: ${body}`
+      });
+    }).then((unsub) => {
+      unsubscribe = unsub;
+    });
+
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
   }, []);
 
   const handleEnableReminders = async () => {
@@ -27,7 +114,8 @@ const NotificationPrompt = ({ user, role = 'student' }) => {
       }
 
       if (res.success && res.token) {
-        // Save to backend database
+        localStorage.setItem('myera_fcm_token', res.token);
+
         await notificationAPI.saveToken({
           token: res.token,
           role,
@@ -35,20 +123,20 @@ const NotificationPrompt = ({ user, role = 'student' }) => {
           email: user?.email
         });
 
-        localStorage.setItem('myera_fcm_token', res.token);
+        setIsTokenSynced(true);
         setStatusMsg({
           type: 'success',
-          text: '🎉 Class reminders enabled! You will receive alerts 5 minutes before your timetable classes.'
+          text: '🎉 Reminders activated! Push alerts & emails will arrive 5 minutes before scheduled lectures.'
         });
       } else if (res.reason === 'unconfigured') {
         setStatusMsg({
           type: 'info',
-          text: 'Browser permission granted! (Add your Firebase config to frontend/.env to complete device token sync)'
+          text: 'Browser permission granted! Firebase configuration active.'
         });
       } else if (res.reason === 'denied') {
         setStatusMsg({
           type: 'error',
-          text: '⚠️ Permission blocked. Click the 🔒 lock icon next to the URL in your browser address bar > Permissions > Allow Notifications, then refresh.'
+          text: '⚠️ Permission blocked. Click the 🔒 lock icon in your browser address bar > Permissions > Allow Notifications, then reload.'
         });
       } else {
         setStatusMsg({
@@ -68,8 +156,16 @@ const NotificationPrompt = ({ user, role = 'student' }) => {
 
   const handleSendTestNotification = async () => {
     setTestLoading(true);
+    setStatusMsg(null);
+
     try {
-      const savedToken = localStorage.getItem('myera_fcm_token');
+      let savedToken = localStorage.getItem('myera_fcm_token');
+
+      // If token is missing, generate and sync it right now
+      if (!savedToken && 'Notification' in window && Notification.permission === 'granted') {
+        savedToken = await syncDeviceToken(false);
+      }
+
       const res = await notificationAPI.testReminder({
         email: user?.email,
         token: savedToken || undefined,
@@ -90,12 +186,12 @@ const NotificationPrompt = ({ user, role = 'student' }) => {
       } else if (pushResult && !pushResult.success && emailResult?.success) {
         setStatusMsg({
           type: 'info',
-          text: `📧 Email sent to ${user?.email}! (Push notification not active on this browser: ${pushResult.error || 'Token not saved'})`
+          text: `📧 Email delivered to ${user?.email}! (Push notification not received: ${pushResult.error || 'Ensure notifications are allowed in browser settings'})`
         });
       } else {
         setStatusMsg({
           type: 'success',
-          text: `🚀 Test reminder dispatched to ${user?.email || 'your device'}!`
+          text: `🚀 Test reminder dispatched to ${user?.email || 'your device'}! Check your inbox and notification tray.`
         });
       }
     } catch (err) {
@@ -112,10 +208,10 @@ const NotificationPrompt = ({ user, role = 'student' }) => {
     return null;
   }
 
-  // Already granted permission
+  // Already granted permission view
   if (permission === 'granted') {
     return (
-      <div className="mb-6 bg-slate-900/60 backdrop-blur-md border border-emerald-500/30 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-lg shadow-emerald-950/20">
+      <div className="mb-6 bg-slate-900/70 backdrop-blur-md border border-emerald-500/30 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-lg shadow-emerald-950/20">
         <div className="flex items-center space-x-3">
           <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
             <BellRing className="w-5 h-5 animate-pulse" />
@@ -127,18 +223,38 @@ const NotificationPrompt = ({ user, role = 'student' }) => {
                 <CheckCircle className="w-3 h-3 mr-1 text-emerald-400" /> ON
               </span>
             </div>
-            <p className="text-xs text-slate-400 mt-0.5">
-              You will receive push and email reminders 5 minutes before scheduled timetable slots.
-            </p>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-300 mt-1">
+              <span className="inline-flex items-center gap-1 text-emerald-300">
+                <Smartphone className="w-3.5 h-3.5" />
+                {isTokenSynced ? 'Device Push Connected' : isSyncing ? 'Connecting Device...' : 'Push Ready'}
+              </span>
+              <span className="text-slate-500">•</span>
+              <span className="inline-flex items-center gap-1 text-indigo-300">
+                <Mail className="w-3.5 h-3.5" />
+                Email Alerts: {user?.email || 'Active'}
+              </span>
+            </div>
           </div>
         </div>
 
         <div className="flex items-center space-x-2">
+          {!isTokenSynced && (
+            <button
+              onClick={() => syncDeviceToken(true)}
+              disabled={isSyncing}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-950/70 hover:bg-indigo-900 text-indigo-200 border border-indigo-500/30 transition flex items-center space-x-1.5 disabled:opacity-50"
+              title="Sync device token with database"
+            >
+              <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
+              <span>{isSyncing ? 'Syncing...' : 'Sync Device'}</span>
+            </button>
+          )}
+
           <button
             onClick={handleSendTestNotification}
             disabled={testLoading}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition flex items-center space-x-1.5 disabled:opacity-50"
-            title="Send an immediate test alert to verify setup"
+            className="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 transition flex items-center space-x-1.5 disabled:opacity-50 shadow-sm"
+            title="Send an immediate test alert to verify email and push setup"
           >
             <Send className="w-3 h-3 text-indigo-400" />
             <span>{testLoading ? 'Testing...' : 'Test Alert'}</span>
@@ -146,13 +262,21 @@ const NotificationPrompt = ({ user, role = 'student' }) => {
         </div>
 
         {statusMsg && (
-          <div className="w-full mt-2 text-xs py-1.5 px-3 rounded-lg flex items-center space-x-2 bg-slate-800/90 border border-slate-700 text-slate-300">
+          <div className="w-full mt-2 text-xs py-2 px-3 rounded-lg flex items-center space-x-2 bg-slate-800/95 border border-slate-700 text-slate-200">
             {statusMsg.type === 'success' ? (
               <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+            ) : statusMsg.type === 'info' ? (
+              <AlertCircle className="w-4 h-4 text-indigo-400 shrink-0" />
             ) : (
               <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
             )}
-            <span>{statusMsg.text}</span>
+            <span className="flex-1">{statusMsg.text}</span>
+            <button
+              onClick={() => setStatusMsg(null)}
+              className="text-slate-400 hover:text-slate-200 ml-2 text-sm font-bold"
+            >
+              ×
+            </button>
           </div>
         )}
       </div>
@@ -211,7 +335,13 @@ const NotificationPrompt = ({ user, role = 'student' }) => {
           ) : (
             <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
           )}
-          <span>{statusMsg.text}</span>
+          <span className="flex-1">{statusMsg.text}</span>
+          <button
+            onClick={() => setStatusMsg(null)}
+            className="text-slate-400 hover:text-slate-200 ml-2 text-sm font-bold"
+          >
+            ×
+          </button>
         </div>
       )}
     </div>

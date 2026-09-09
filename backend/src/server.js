@@ -4,12 +4,25 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 
-// Set reliable DNS servers and force IPv4 first to prevent ENETUNREACH / timeout errors on cloud hosting (Render)
+// Set reliable DNS servers and force IPv4 only to prevent ENETUNREACH / timeout errors on cloud hosting (Render)
 try {
-  dns.setServers(['8.8.8.8', '8.8.4.4', '1.1.1.1']);
   if (dns.setDefaultResultOrder) {
     dns.setDefaultResultOrder('ipv4first');
   }
+  // Disable IPv6 resolution in Node's Resolver to prevent Nodemailer from picking unreachable IPv6 addresses
+  if (dns.Resolver && dns.Resolver.prototype) {
+    dns.Resolver.prototype.resolve6 = function (hostname, options, callback) {
+      const cb = typeof options === 'function' ? options : callback;
+      if (cb) setImmediate(() => cb(null, []));
+    };
+  }
+  if (dns.resolve6) {
+    dns.resolve6 = function (hostname, options, callback) {
+      const cb = typeof options === 'function' ? options : callback;
+      if (cb) setImmediate(() => cb(null, []));
+    };
+  }
+  dns.setServers(['8.8.8.8', '8.8.4.4', '1.1.1.1']);
 } catch (dnsErr) {
   console.warn('DNS server configuration warning:', dnsErr.message);
 }

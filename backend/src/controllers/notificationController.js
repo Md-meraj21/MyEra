@@ -215,8 +215,9 @@ exports.sendClassReminderToStudents = async (req, res) => {
     }
 
     // 3. Send confirmation Email & Push to Teacher
+    let teacherEmailPromise = null;
     if (finalTeacherEmail) {
-      sendClassReminderEmail({
+      teacherEmailPromise = sendClassReminderEmail({
         to: finalTeacherEmail,
         recipientName: finalTeacherName,
         role: 'teacher',
@@ -226,7 +227,7 @@ exports.sendClassReminderToStudents = async (req, res) => {
         period: Number(period) || 1,
         time: time || 'Upcoming slot',
         teacherName: finalTeacherName
-      }).catch((e) => console.warn('Teacher email reminder error:', e.message));
+      }).catch((e) => ({ success: false, error: e.message }));
     }
 
     if (teacherTokens.length > 0) {
@@ -243,27 +244,35 @@ exports.sendClassReminderToStudents = async (req, res) => {
       }).catch((e) => console.warn('Teacher push reminder error:', e.message));
     }
 
-    // Wait for student emails to dispatch
-    const emailResults = await Promise.allSettled(emailPromises);
+    // Wait for student & teacher emails to dispatch
+    const [emailResults, teacherEmailRes] = await Promise.all([
+      Promise.allSettled(emailPromises),
+      teacherEmailPromise
+    ]);
+
     const successfulEmails = emailResults.filter(
       (r) => r.status === 'fulfilled' && r.value?.success
     ).length;
+    const teacherEmailSuccess = teacherEmailRes ? Boolean(teacherEmailRes.success) : false;
 
     let emailWarning = null;
     if (students.length > 0 && successfulEmails === 0) {
       const firstFail = emailResults.find((r) => r.status === 'fulfilled' && !r.value?.success);
-      emailWarning = firstFail?.value?.error || 'Email connection could not be established.';
+      emailWarning = firstFail?.value?.error || teacherEmailRes?.error || 'Email connection could not be established.';
+    } else if (finalTeacherEmail && !teacherEmailSuccess) {
+      emailWarning = teacherEmailRes?.error || 'Teacher confirmation email delivery failed.';
     }
 
     return res.status(200).json({
       success: true,
       studentCount: students.length,
       successfulEmails,
+      teacherEmailSuccess,
       emailWarning,
       pushTokensCount: studentTokens.length,
       message: emailWarning
         ? `⚠️ Found ${students.length} student(s), but email delivery issue: ${emailWarning}`
-        : `Reminder for "${subject}" dispatched to ${successfulEmails} student(s) in ${cleanClass} (${cleanSection})!`,
+        : `Reminder for "${subject}" dispatched to ${successfulEmails} student(s) & teacher!`,
       students: students.map((s) => ({ name: s.name, email: s.email }))
     });
   } catch (err) {

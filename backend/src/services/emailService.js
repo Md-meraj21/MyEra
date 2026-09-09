@@ -1,4 +1,22 @@
+const dns = require('dns');
 const nodemailer = require('nodemailer');
+
+// Ensure IPv4-only resolution so Nodemailer does not crash with ENETUNREACH on cloud environments
+if (dns.setDefaultResultOrder) {
+  dns.setDefaultResultOrder('ipv4first');
+}
+if (dns.Resolver && dns.Resolver.prototype) {
+  dns.Resolver.prototype.resolve6 = function (hostname, options, callback) {
+    const cb = typeof options === 'function' ? options : callback;
+    if (cb) setImmediate(() => cb(null, []));
+  };
+}
+if (dns.resolve6) {
+  dns.resolve6 = function (hostname, options, callback) {
+    const cb = typeof options === 'function' ? options : callback;
+    if (cb) setImmediate(() => cb(null, []));
+  };
+}
 
 let transporter = null;
 
@@ -20,7 +38,6 @@ const getTransporter = () => {
       user,
       pass
     },
-    family: 4,
     connectionTimeout: 15000,
     greetingTimeout: 15000,
     socketTimeout: 20000
@@ -43,7 +60,8 @@ const sendClassReminderEmail = async ({
 }) => {
   try {
     const transport = getTransporter();
-    const fromAddress = process.env.EMAIL_FROM || `"MyEra Smart Classroom" <${process.env.SMTP_USER || 'no-reply@myera.internal'}>`;
+    const senderEmail = process.env.SMTP_USER || 'no-reply@myera.internal';
+    const fromAddress = `"MyEra Smart Classroom" <${senderEmail}>`;
     const frontendUrl = process.env.FRONTEND_URL || 'https://myera-eight.vercel.app';
 
     if (!transport) {
