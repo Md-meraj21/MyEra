@@ -69,6 +69,7 @@ export const studentAPI = {
 export const notificationAPI = {
   saveToken: (data) => api.post('/notifications/save-token', data),
   testReminder: (data) => api.post('/notifications/test-reminder', data),
+  sendClassReminder: (data) => api.post('/notifications/send-class-reminder', data),
 };
 
 export default api;

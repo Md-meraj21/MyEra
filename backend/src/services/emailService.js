@@ -7,7 +7,8 @@ let transporter = null;
  */
 const getTransporter = () => {
   const host = process.env.SMTP_HOST || 'smtp.gmail.com';
-  const port = parseInt(process.env.SMTP_PORT || '587', 10);
+  // Use port 465 with SSL as default for reliable delivery on Render / cloud containers
+  const port = parseInt(process.env.SMTP_PORT || '465', 10);
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
 
@@ -19,11 +20,15 @@ const getTransporter = () => {
     transporter = nodemailer.createTransport({
       host,
       port,
-      secure: port === 465, // true for 465, false for 587
+      secure: port === 465, // true for 465 SSL, false for 587 STARTTLS
       auth: {
         user,
         pass
-      }
+      },
+      family: 4, // Force IPv4 to prevent ENETUNREACH on Render
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 15000
     });
   }
 
@@ -154,17 +159,27 @@ const sendClassReminderEmail = async ({
 /**
  * Send a verification test email
  */
-const sendTestEmail = async (to) => {
+const sendTestEmail = async ({
+  to,
+  recipientName = 'MyEra User',
+  role = 'student',
+  subject = 'Machine Learning',
+  className = 'CSE',
+  section = 'A',
+  period = 1,
+  time = 'Upcoming Period',
+  teacherName = 'Er. Faculty'
+}) => {
   return sendClassReminderEmail({
     to,
-    recipientName: 'MyEra User',
-    role: 'student',
-    subject: 'Sample Data Structures & Algorithms',
-    className: 'CS-4A',
-    section: 'A',
-    period: 1,
-    time: '09:00 AM - 10:00 AM',
-    teacherName: 'Prof. Demo Teacher'
+    recipientName,
+    role,
+    subject,
+    className,
+    section,
+    period,
+    time,
+    teacherName
   });
 };
 

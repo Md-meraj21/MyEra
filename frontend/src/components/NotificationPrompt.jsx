@@ -45,6 +45,11 @@ const NotificationPrompt = ({ user, role = 'student' }) => {
           type: 'info',
           text: 'Browser permission granted! (Add your Firebase config to frontend/.env to complete device token sync)'
         });
+      } else if (res.reason === 'denied') {
+        setStatusMsg({
+          type: 'error',
+          text: '⚠️ Permission blocked. Click the 🔒 lock icon next to the URL in your browser address bar > Permissions > Allow Notifications, then refresh.'
+        });
       } else {
         setStatusMsg({
           type: 'error',
@@ -65,18 +70,38 @@ const NotificationPrompt = ({ user, role = 'student' }) => {
     setTestLoading(true);
     try {
       const savedToken = localStorage.getItem('myera_fcm_token');
-      await notificationAPI.testReminder({
+      const res = await notificationAPI.testReminder({
         email: user?.email,
-        token: savedToken || undefined
+        token: savedToken || undefined,
+        teacherName: user?.name,
+        role,
+        subject: user?.subject || (role === 'teacher' ? 'Class Lecture' : 'Class Period'),
+        time: 'Upcoming Period'
       });
-      setStatusMsg({
-        type: 'success',
-        text: `🚀 Test reminder dispatched to ${user?.email || 'your device'}!`
-      });
+
+      const emailResult = res.data?.results?.email;
+      const pushResult = res.data?.results?.push;
+
+      if (emailResult && !emailResult.success) {
+        setStatusMsg({
+          type: 'error',
+          text: `⚠️ Email delivery failed: ${emailResult.error || 'Check SMTP configuration.'}`
+        });
+      } else if (pushResult && !pushResult.success && emailResult?.success) {
+        setStatusMsg({
+          type: 'info',
+          text: `📧 Email sent to ${user?.email}! (Push notification not active on this browser: ${pushResult.error || 'Token not saved'})`
+        });
+      } else {
+        setStatusMsg({
+          type: 'success',
+          text: `🚀 Test reminder dispatched to ${user?.email || 'your device'}!`
+        });
+      }
     } catch (err) {
       setStatusMsg({
         type: 'error',
-        text: 'Could not trigger test reminder.'
+        text: err.response?.data?.message || err.message || 'Could not trigger test reminder.'
       });
     } finally {
       setTestLoading(false);

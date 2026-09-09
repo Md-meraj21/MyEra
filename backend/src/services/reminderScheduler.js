@@ -92,10 +92,10 @@ const processClassReminders = async () => {
         const classStartMinutes = parseStartTimeToMinutes(entry.time);
         if (classStartMinutes === null) continue;
 
-        // Reminder condition: exactly 5 minutes before (or 4-5 min window)
+        // Reminder condition: 4 to 6 minutes before class start
         const diffMinutes = classStartMinutes - currentTotalMinutes;
 
-        if (diffMinutes === 5 || diffMinutes === 4) {
+        if (diffMinutes >= 4 && diffMinutes <= 6) {
           const dedupeKey = `${teacher._id}_${entry.day}_${entry.period}_${entry.class}_${entry.section}_${dateKey}`;
 
           if (sentRemindersCache.has(dedupeKey)) {
@@ -135,10 +135,15 @@ const processClassReminders = async () => {
 
           // 2. Find and Notify Enrolled Students
           try {
-            const students = await Student.find({
-              class: { $regex: new RegExp(`^${entry.class}$`, 'i') },
-              section: { $regex: new RegExp(`^${entry.section}$`, 'i') }
-            }).select('name email notificationTokens');
+            const cleanClass = (entry.class || '').trim();
+            const cleanSection = (entry.section || '').trim();
+            const studentQuery = {
+              class: { $regex: new RegExp(`^${cleanClass}$`, 'i') }
+            };
+            if (cleanSection) {
+              studentQuery.section = { $regex: new RegExp(`^${cleanSection}$`, 'i') };
+            }
+            const students = await Student.find(studentQuery).select('name email notificationTokens');
 
             if (students && students.length > 0) {
               const allStudentTokens = [];

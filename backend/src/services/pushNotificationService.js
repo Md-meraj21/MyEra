@@ -1,15 +1,20 @@
-const admin = require('firebase-admin');
+const { initializeApp, cert, getApps } = require('firebase-admin/app');
+const { getMessaging } = require('firebase-admin/messaging');
 const path = require('path');
 const fs = require('fs');
 
 let isInitialized = false;
+let firebaseApp = null;
 
 /**
  * Initialize Firebase Admin SDK using Service Account JSON file or Environment Variables
  */
 const initFirebaseAdmin = () => {
-  if (isInitialized) return true;
-  if (admin.apps.length > 0) {
+  if (isInitialized && firebaseApp) return true;
+
+  const existingApps = getApps();
+  if (existingApps.length > 0) {
+    firebaseApp = existingApps[0];
     isInitialized = true;
     return true;
   }
@@ -21,8 +26,8 @@ const initFirebaseAdmin = () => {
       const resolvedPath = path.isAbsolute(saPath) ? saPath : path.join(process.cwd(), saPath);
       if (fs.existsSync(resolvedPath)) {
         const serviceAccount = require(resolvedPath);
-        admin.initializeApp({
-          credential: admin.credential.cert(serviceAccount)
+        firebaseApp = initializeApp({
+          credential: cert(serviceAccount)
         });
         isInitialized = true;
         console.log('✅ [FirebaseAdmin] Initialized successfully with service account file.');
@@ -38,8 +43,8 @@ const initFirebaseAdmin = () => {
     if (projectId && clientEmail && privateKey) {
       // Replace escaped newlines if passed in .env
       privateKey = privateKey.replace(/\\n/g, '\n');
-      admin.initializeApp({
-        credential: admin.credential.cert({
+      firebaseApp = initializeApp({
+        credential: cert({
           projectId,
           clientEmail,
           privateKey
@@ -73,7 +78,7 @@ const sendPushNotification = async ({
     }
 
     const ready = initFirebaseAdmin();
-    if (!ready) {
+    if (!ready || !firebaseApp) {
       console.log(`ℹ️ [PushNotification (Dry Run)]: "${title} - ${body}" targeted at ${validTokens.length} device(s), but Firebase Admin is unconfigured in .env.`);
       return { success: false, reason: 'unconfigured' };
     }
@@ -110,7 +115,8 @@ const sendPushNotification = async ({
       }
     };
 
-    const response = await admin.messaging().sendEachForMulticast(message);
+    const messaging = getMessaging(firebaseApp);
+    const response = await messaging.sendEachForMulticast(message);
     console.log(`✅ [PushNotification] Sent: ${response.successCount} succeeded, ${response.failureCount} failed.`);
 
     return {

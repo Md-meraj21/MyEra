@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Calendar, Clock, Plus, Play, Trash2, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
+import { Calendar, Clock, Plus, Play, Trash2, CheckCircle2, AlertCircle, RefreshCw, Bell } from 'lucide-react';
+import { notificationAPI } from '../services/api';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -20,6 +21,8 @@ const Timetable = ({ timetable = [], onSaveTimetable, onStartSession, isTeacher 
   const [formError, setFormError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [notifyingIdx, setNotifyingIdx] = useState(null);
+  const [notifyToast, setNotifyToast] = useState(null);
 
   const [formData, setFormData] = useState({
     day: selectedDay,
@@ -87,8 +90,58 @@ const Timetable = ({ timetable = [], onSaveTimetable, onStartSession, isTeacher 
     }
   };
 
+  const handleNotifyStudents = async (slot, idx) => {
+    setNotifyingIdx(idx);
+    setNotifyToast(null);
+    try {
+      const res = await notificationAPI.sendClassReminder({
+        subject: slot.subject,
+        class: slot.class,
+        section: slot.section,
+        period: slot.period,
+        time: slot.time
+      });
+
+      setNotifyToast({
+        type: 'success',
+        text: res.data?.message || `🚀 5-min alert dispatched to students for ${slot.subject}!`
+      });
+      setTimeout(() => setNotifyToast(null), 5000);
+    } catch (err) {
+      setNotifyToast({
+        type: 'error',
+        text: err.response?.data?.message || err.message || 'Failed to send class reminder to students.'
+      });
+      setTimeout(() => setNotifyToast(null), 5000);
+    } finally {
+      setNotifyingIdx(null);
+    }
+  };
+
   return (
     <div className="space-y-4">
+      {notifyToast && (
+        <div className={`p-3.5 rounded-2xl flex items-center justify-between gap-2 text-xs font-semibold border animate-fade-in ${
+          notifyToast.type === 'success'
+            ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+            : 'bg-rose-50 text-rose-800 border-rose-200'
+        }`}>
+          <div className="flex items-center gap-2">
+            {notifyToast.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            )}
+            <span>{notifyToast.text}</span>
+          </div>
+          <button
+            onClick={() => setNotifyToast(null)}
+            className="text-slate-400 hover:text-slate-600 text-sm font-bold"
+          >
+            ×
+          </button>
+        </div>
+      )}
       {/* Day Selector Bar */}
       <div className="card-human rounded-2xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         {/* Day Tabs */}
@@ -203,6 +256,16 @@ const Timetable = ({ timetable = [], onSaveTimetable, onStartSession, isTeacher 
                       >
                         <Play className="w-3 h-3 fill-current" />
                         <span>Start Attendance</span>
+                      </button>
+
+                      <button
+                        onClick={() => handleNotifyStudents(slot, idx)}
+                        disabled={notifyingIdx === idx}
+                        title="Send 5-min reminder email & push notification to all students of this class"
+                        className="p-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-xl transition border border-blue-200 flex items-center gap-1 text-xs font-semibold disabled:opacity-50"
+                      >
+                        <Bell className={`w-3.5 h-3.5 ${notifyingIdx === idx ? 'animate-bounce text-blue-600' : ''}`} />
+                        <span className="hidden sm:inline">{notifyingIdx === idx ? 'Sending...' : 'Remind'}</span>
                       </button>
 
                       {rawIndex !== -1 && (

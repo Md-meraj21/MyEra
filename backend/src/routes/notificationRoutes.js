@@ -24,4 +24,7 @@ router.post('/save-token', optionalAuth, notificationController.saveToken);
 // Trigger test reminder
 router.post('/test-reminder', notificationController.testReminder);
 
+// Send class reminder to all enrolled students
+router.post('/send-class-reminder', optionalAuth, notificationController.sendClassReminderToStudents);
+
 module.exports = router;

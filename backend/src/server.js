@@ -4,9 +4,12 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 
-// Set reliable DNS servers (Google / Cloudflare) to prevent Windows querySrv ECONNREFUSED on MongoDB Atlas SRV records
+// Set reliable DNS servers and force IPv4 first to prevent ENETUNREACH / timeout errors on cloud hosting (Render)
 try {
   dns.setServers(['8.8.8.8', '8.8.4.4', '1.1.1.1']);
+  if (dns.setDefaultResultOrder) {
+    dns.setDefaultResultOrder('ipv4first');
+  }
 } catch (dnsErr) {
   console.warn('DNS server configuration warning:', dnsErr.message);
 }
