@@ -54,6 +54,7 @@ app.use('/api/notifications', notificationRoutes);
 app.get('/', (req, res) => {
   res.status(200).json({
     success: true,
+    version: '2.0.0-gmail-service',
     message: 'MyEra Smart Classroom Attendance System API is running smoothly.',
     timestamp: new Date()
   });

@@ -244,13 +244,26 @@ exports.sendClassReminderToStudents = async (req, res) => {
     }
 
     // Wait for student emails to dispatch
-    await Promise.allSettled(emailPromises);
+    const emailResults = await Promise.allSettled(emailPromises);
+    const successfulEmails = emailResults.filter(
+      (r) => r.status === 'fulfilled' && r.value?.success
+    ).length;
+
+    let emailWarning = null;
+    if (students.length > 0 && successfulEmails === 0) {
+      const firstFail = emailResults.find((r) => r.status === 'fulfilled' && !r.value?.success);
+      emailWarning = firstFail?.value?.error || 'Email connection could not be established.';
+    }
 
     return res.status(200).json({
       success: true,
       studentCount: students.length,
+      successfulEmails,
+      emailWarning,
       pushTokensCount: studentTokens.length,
-      message: `Reminder for "${subject}" dispatched to ${students.length} students in ${cleanClass} (${cleanSection}) and teacher confirmation sent!`,
+      message: emailWarning
+        ? `⚠️ Found ${students.length} student(s), but email delivery issue: ${emailWarning}`
+        : `Reminder for "${subject}" dispatched to ${successfulEmails} student(s) in ${cleanClass} (${cleanSection})!`,
       students: students.map((s) => ({ name: s.name, email: s.email }))
     });
   } catch (err) {

@@ -3,14 +3,9 @@ const nodemailer = require('nodemailer');
 let transporter = null;
 
 /**
- * Initialize or get existing Nodemailer transporter
+ * Initialize or get Nodemailer transporter using standard Gmail service
  */
 const getTransporter = () => {
-  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
-  const isGmail = host.toLowerCase().includes('gmail.com');
-  // Cloud providers like Render block port 587 / STARTTLS. For Gmail, always enforce port 465 SSL.
-  const port = isGmail ? 465 : parseInt(process.env.SMTP_PORT || '465', 10);
-  const secure = port === 465 || isGmail;
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
 
@@ -18,23 +13,18 @@ const getTransporter = () => {
     return null;
   }
 
-  if (!transporter) {
-    transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure,
-      auth: {
-        user,
-        pass
-      },
-      family: 4, // Force IPv4 to prevent ENETUNREACH on Render
-      connectionTimeout: 15000,
-      greetingTimeout: 15000,
-      socketTimeout: 20000
-    });
-  }
-
-  return transporter;
+  // Use service: 'gmail' with IPv4 enforcement for rock-solid cloud delivery
+  return nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user,
+      pass
+    },
+    family: 4,
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 20000
+  });
 };
 
 /**
