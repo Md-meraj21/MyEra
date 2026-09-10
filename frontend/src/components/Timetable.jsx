@@ -188,29 +188,27 @@ const Timetable = ({ timetable = [], onSaveTimetable, onStartSession, isTeacher 
         period: slot.period,
         time: slot.time,
         teacherId: user?._id || user?.id,
-        teacherName: user?.name,
-        teacherEmail: user?.email
+        teacherName: user?.name
       });
 
       const count = res.data?.studentCount || 0;
       const successfulEmails = res.data?.successfulEmails ?? count;
-      const teacherEmailSuccess = res.data?.teacherEmailSuccess ?? true;
       const pushCount = res.data?.pushTokensCount || 0;
       const emailWarning = res.data?.emailWarning;
 
       const pushMsg = pushCount > 0 
         ? ` • 📱 ${pushCount} Push alert(s) sent`
-        : ` • ℹ️ Students have not opened the app to enable push notifications yet`;
+        : '';
 
       if (emailWarning && successfulEmails === 0) {
         setNotifyToast({
           type: 'error',
-          text: `⚠️ Found ${count} student(s), but email delivery error: ${emailWarning}${pushMsg}`
+          text: `⚠️ Found ${count} student(s), but email delivery error: ${emailWarning}`
         });
       } else {
         setNotifyToast({
           type: 'success',
-          text: `📧 Reminder for "${slot.subject}" delivered to ${successfulEmails} student(s)${teacherEmailSuccess ? ' & your email' : ''}!${pushMsg}`
+          text: `📧 Reminder for "${slot.subject}" sent to ${successfulEmails} student(s) of stream ${slot.class} (${slot.section || 'A'})!${pushMsg}`
         });
       }
       setTimeout(() => setNotifyToast(null), 10000);

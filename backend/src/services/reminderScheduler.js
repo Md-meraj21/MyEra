@@ -105,47 +105,56 @@ const processClassReminders = async () => {
           }
           sentRemindersCache.add(dedupeKey);
 
-          console.log(`⏰ [ReminderScheduler] Triggering 5-minute alert for "${entry.subject}" (${entry.class}-${entry.section}, ${entry.time})`);
+// Helper to match student stream/branch flexibly (e.g. CS-4A -> CSE, Civil -> CE, etc.)
+const buildStudentClassFilter = (className, section) => {
+  if (!className) return {};
+  const raw = String(className).trim().toUpperCase();
 
-          // 1. Notify Teacher
-          // Email
-          sendClassReminderEmail({
-            to: teacher.email,
-            recipientName: teacher.name,
-            role: 'teacher',
-            subject: entry.subject,
-            className: entry.class,
-            section: entry.section,
-            period: entry.period,
-            time: entry.time,
-            teacherName: teacher.name
-          }).catch((e) => console.error('[ReminderScheduler] Teacher email error:', e.message));
+  let classRegex;
+  if (/^(CS|CSE|COMPUTER)/.test(raw)) {
+    classRegex = /^(CS|CSE|COMPUTER)/i;
+  } else if (/^(CIVIL|CE)/.test(raw)) {
+    classRegex = /^(CIVIL|CE)/i;
+  } else if (/^(MECH|MECHANICAL|ME)/.test(raw)) {
+    classRegex = /^(MECH|MECHANICAL|ME)/i;
+  } else if (/^(ELECTRICAL|EE|EEE)/.test(raw)) {
+    classRegex = /^(ELECTRICAL|EE|EEE)/i;
+  } else if (/^(ELECTRONICS|ECE)/.test(raw)) {
+    classRegex = /^(ELECTRONICS|ECE)/i;
+  } else {
+    const cleanPrefix = raw.replace(/[-_\s]*\d+.*$/, '').trim();
+    if (cleanPrefix.length >= 2) {
+      classRegex = new RegExp(`^(${raw}|${cleanPrefix})`, 'i');
+    } else {
+      classRegex = new RegExp(`^${raw}`, 'i');
+    }
+  }
 
-          // Push Notification
-          if (teacher.notificationTokens && teacher.notificationTokens.length > 0) {
-            sendPushNotification({
-              tokens: teacher.notificationTokens,
-              title: `⏰ Lecture in 5 Mins: ${entry.subject}`,
-              body: `Your lecture for ${entry.class} (${entry.section}) starts at ${entry.time.split('-')[0].trim()}.`,
-              data: {
-                url: `${process.env.FRONTEND_URL || 'https://myera-eight.vercel.app'}/teacher-dashboard`,
-                type: 'class_reminder',
-                role: 'teacher'
-              }
-            }).catch((e) => console.error('[ReminderScheduler] Teacher push error:', e.message));
-          }
+  const query = { class: { $regex: classRegex } };
 
-          // 2. Find and Notify Enrolled Students
+  const cleanSec = (section || '').trim();
+  if (cleanSec) {
+    query.$or = [
+      { section: { $regex: new RegExp(`^${cleanSec}$`, 'i') } },
+      { section: { $exists: false } },
+      { section: '' },
+      { section: null }
+    ];
+  }
+
+  return query;
+};
+
+          console.log(`⏰ [ReminderScheduler] Triggering 5-minute student alert for "${entry.subject}" (${entry.class}-${entry.section}, ${entry.time})`);
+
+          // Find and Notify Enrolled Students of this stream
           try {
             const cleanClass = (entry.class || '').trim();
             const cleanSection = (entry.section || '').trim();
-            const studentQuery = {
-              class: { $regex: new RegExp(`^${cleanClass}$`, 'i') }
-            };
-            if (cleanSection) {
-              studentQuery.section = { $regex: new RegExp(`^${cleanSection}$`, 'i') };
-            }
-            const students = await Student.find(studentQuery).select('name email notificationTokens');
+            const studentQuery = buildStudentClassFilter(cleanClass, cleanSection);
+            const students = await Student.find(studentQuery).select('name email notificationTokens class section');
+
+            console.log(`📢 [ReminderScheduler] Found ${students.length} student(s) for stream "${cleanClass}" (Section ${cleanSection || 'Any'}) for "${entry.subject}"`);
 
             if (students && students.length > 0) {
               const allStudentTokens = [];
@@ -172,14 +181,14 @@ const processClassReminders = async () => {
                 }
               }
 
-              // Send batch multicast push notifications to all students
+              // Send batch multicast push notifications to all students of this stream
               if (allStudentTokens.length > 0) {
                 sendPushNotification({
                   tokens: allStudentTokens,
                   title: `🎒 Class in 5 Mins: ${entry.subject}`,
                   body: `${entry.subject} with ${teacher.name} starts at ${entry.time.split('-')[0].trim()}. Get ready to mark attendance!`,
                   data: {
-                    url: `${process.env.FRONTEND_URL || 'https://myera-eight.vercel.app'}/student-dashboard`,
+                    url: `${process.env.FRONTEND_URL || 'https://myera-eight.vercel.app'}/student`,
                     type: 'class_reminder',
                     role: 'student'
                   }

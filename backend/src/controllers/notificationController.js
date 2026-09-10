@@ -124,6 +124,46 @@ exports.testReminder = async (req, res) => {
   }
 };
 
+// Helper to match student stream/branch flexibly (e.g. CS-4A -> CSE, Civil -> CE, etc.)
+const buildStudentClassFilter = (className, section) => {
+  if (!className) return {};
+  const raw = String(className).trim().toUpperCase();
+
+  let classRegex;
+  if (/^(CS|CSE|COMPUTER)/.test(raw)) {
+    classRegex = /^(CS|CSE|COMPUTER)/i;
+  } else if (/^(CIVIL|CE)/.test(raw)) {
+    classRegex = /^(CIVIL|CE)/i;
+  } else if (/^(MECH|MECHANICAL|ME)/.test(raw)) {
+    classRegex = /^(MECH|MECHANICAL|ME)/i;
+  } else if (/^(ELECTRICAL|EE|EEE)/.test(raw)) {
+    classRegex = /^(ELECTRICAL|EE|EEE)/i;
+  } else if (/^(ELECTRONICS|ECE)/.test(raw)) {
+    classRegex = /^(ELECTRONICS|ECE)/i;
+  } else {
+    const cleanPrefix = raw.replace(/[-_\s]*\d+.*$/, '').trim();
+    if (cleanPrefix.length >= 2) {
+      classRegex = new RegExp(`^(${raw}|${cleanPrefix})`, 'i');
+    } else {
+      classRegex = new RegExp(`^${raw}`, 'i');
+    }
+  }
+
+  const query = { class: { $regex: classRegex } };
+
+  const cleanSec = (section || '').trim();
+  if (cleanSec) {
+    query.$or = [
+      { section: { $regex: new RegExp(`^${cleanSec}$`, 'i') } },
+      { section: { $exists: false } },
+      { section: '' },
+      { section: null }
+    ];
+  }
+
+  return query;
+};
+
 /**
  * Send customized class reminder to all students enrolled in a class/section
  * POST /api/notifications/send-class-reminder
@@ -137,8 +177,7 @@ exports.sendClassReminderToStudents = async (req, res) => {
       period = 1,
       time = '',
       teacherName: customTeacherName,
-      teacherId,
-      teacherEmail: customTeacherEmail
+      teacherId
     } = req.body;
 
     if (!subject || !className) {
@@ -148,7 +187,7 @@ exports.sendClassReminderToStudents = async (req, res) => {
       });
     }
 
-    // Resolve teacher
+    // Resolve teacher name for student email content
     let teacher = null;
     const resolvedTeacherId = teacherId || (req.user && req.user.id);
     if (resolvedTeacherId) {
@@ -156,25 +195,16 @@ exports.sendClassReminderToStudents = async (req, res) => {
     }
 
     const finalTeacherName = customTeacherName || teacher?.name || (req.user && req.user.name) || 'Faculty Member';
-    const finalTeacherEmail = customTeacherEmail || teacher?.email || (req.user && req.user.email);
-    const teacherTokens = teacher?.notificationTokens || [];
-
     const cleanClass = (className || '').trim();
     const cleanSection = (section || '').trim();
 
-    // Query students belonging to this class & section
-    const studentQuery = {
-      class: { $regex: new RegExp(`^${cleanClass}$`, 'i') }
-    };
-    if (cleanSection) {
-      studentQuery.section = { $regex: new RegExp(`^${cleanSection}$`, 'i') };
-    }
+    // Query students belonging to this stream / branch & section
+    const studentQuery = buildStudentClassFilter(cleanClass, cleanSection);
+    const students = await Student.find(studentQuery).select('name email notificationTokens class section');
 
-    const students = await Student.find(studentQuery).select('name email notificationTokens');
+    console.log(`📢 [ClassReminder] Found ${students.length} student(s) for stream "${cleanClass}" (Section ${cleanSection || 'Any'}) for subject "${subject}"`);
 
-    console.log(`📢 [ClassReminder] Found ${students.length} student(s) for ${cleanClass}-${cleanSection} (${subject})`);
-
-    // 1. Send individual Emails to students
+    // 1. Send individual Emails to all enrolled students
     const emailPromises = students
       .filter((s) => Boolean(s.email))
       .map((s) =>
@@ -207,73 +237,36 @@ exports.sendClassReminderToStudents = async (req, res) => {
         title: `🎒 Class in 5 Mins: ${subject}`,
         body: `${subject} with ${finalTeacherName} starts at ${startTimeStr}. Open MyEra to mark your attendance!`,
         data: {
-          url: `${process.env.FRONTEND_URL || 'https://myera-eight.vercel.app'}/student-dashboard`,
+          url: `${process.env.FRONTEND_URL || 'https://myera-eight.vercel.app'}/student`,
           type: 'class_reminder',
           role: 'student'
         }
       });
     }
 
-    // 3. Send confirmation Email & Push to Teacher
-    let teacherEmailPromise = null;
-    if (finalTeacherEmail) {
-      teacherEmailPromise = sendClassReminderEmail({
-        to: finalTeacherEmail,
-        recipientName: finalTeacherName,
-        role: 'teacher',
-        subject,
-        className: cleanClass,
-        section: cleanSection,
-        period: Number(period) || 1,
-        time: time || 'Upcoming slot',
-        teacherName: finalTeacherName
-      }).catch((e) => ({ success: false, error: e.message }));
-    }
-
-    if (teacherTokens.length > 0) {
-      const startTimeStr = time ? time.split('-')[0].trim() : 'soon';
-      sendPushNotification({
-        tokens: teacherTokens,
-        title: `⏰ Lecture in 5 Mins: ${subject}`,
-        body: `Your lecture for ${cleanClass} (${cleanSection}) starts at ${startTimeStr}.`,
-        data: {
-          url: `${process.env.FRONTEND_URL || 'https://myera-eight.vercel.app'}/teacher-dashboard`,
-          type: 'class_reminder',
-          role: 'teacher'
-        }
-      }).catch((e) => console.warn('Teacher push reminder error:', e.message));
-    }
-
-    // Wait for student & teacher emails to dispatch
-    const [emailResults, teacherEmailRes] = await Promise.all([
-      Promise.allSettled(emailPromises),
-      teacherEmailPromise
-    ]);
+    // Wait for all student emails to dispatch
+    const emailResults = await Promise.allSettled(emailPromises);
 
     const successfulEmails = emailResults.filter(
       (r) => r.status === 'fulfilled' && r.value?.success
     ).length;
-    const teacherEmailSuccess = teacherEmailRes ? Boolean(teacherEmailRes.success) : false;
 
     let emailWarning = null;
     if (students.length > 0 && successfulEmails === 0) {
       const firstFail = emailResults.find((r) => r.status === 'fulfilled' && !r.value?.success);
-      emailWarning = firstFail?.value?.error || teacherEmailRes?.error || 'Email connection could not be established.';
-    } else if (finalTeacherEmail && !teacherEmailSuccess) {
-      emailWarning = teacherEmailRes?.error || 'Teacher confirmation email delivery failed.';
+      emailWarning = firstFail?.value?.error || 'Email connection could not be established.';
     }
 
     return res.status(200).json({
       success: true,
       studentCount: students.length,
       successfulEmails,
-      teacherEmailSuccess,
       emailWarning,
       pushTokensCount: studentTokens.length,
       message: emailWarning
         ? `⚠️ Found ${students.length} student(s), but email delivery issue: ${emailWarning}`
-        : `Reminder for "${subject}" dispatched to ${successfulEmails} student(s) & teacher!`,
-      students: students.map((s) => ({ name: s.name, email: s.email }))
+        : `Reminder for "${subject}" successfully sent to ${successfulEmails} student(s) of ${cleanClass}!`,
+      students: students.map((s) => ({ name: s.name, email: s.email, class: s.class, section: s.section }))
     });
   } catch (err) {
     console.error('Error in sendClassReminderToStudents:', err);
