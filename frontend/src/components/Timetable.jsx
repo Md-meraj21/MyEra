@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Calendar, Clock, Plus, Play, Trash2, CheckCircle2, AlertCircle, RefreshCw, Bell } from 'lucide-react';
 import { notificationAPI } from '../services/api';
 
