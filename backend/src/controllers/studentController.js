@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const Student = require('../models/Student');
+const Teacher = require('../models/Teacher');
 const Session = require('../models/Session');
 const { checkLocation } = require('../utils/locationCheck');
 
@@ -375,6 +376,85 @@ exports.getAttendanceHistory = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: error.message || 'Server error while fetching attendance history.'
+    });
+  }
+};
+
+/**
+ * Get aggregated Timetable for a Student (compiled from all teachers teaching this student's class & section)
+ * GET /api/student/timetable/:id
+ */
+exports.getStudentTimetable = async (req, res) => {
+  try {
+    const studentId = req.params.id || req.user?.id;
+    if (!studentId || !mongoose.Types.ObjectId.isValid(studentId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid Student ID is required.'
+      });
+    }
+
+    const student = await Student.findById(studentId);
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: 'Student not found.'
+      });
+    }
+
+    const cleanClass = (student.class || '').trim();
+    const cleanSection = (student.section || '').trim();
+
+    let classRegex;
+    const raw = cleanClass.toUpperCase();
+    if (/^(CS|CSE|COMPUTER)/.test(raw)) {
+      classRegex = /^(CS|CSE|COMPUTER)/i;
+    } else if (/^(CIVIL|CE)/.test(raw)) {
+      classRegex = /^(CIVIL|CE)/i;
+    } else if (/^(MECH|MECHANICAL|ME)/.test(raw)) {
+      classRegex = /^(MECH|MECHANICAL|ME)/i;
+    } else if (/^(ELECTRICAL|EE|EEE)/.test(raw)) {
+      classRegex = /^(ELECTRICAL|EE|EEE)/i;
+    } else if (/^(ELECTRONICS|ECE)/.test(raw)) {
+      classRegex = /^(ELECTRONICS|ECE)/i;
+    } else {
+      const cleanPrefix = raw.replace(/[-_\s]*\d+.*$/, '').trim();
+      classRegex = cleanPrefix.length >= 2 ? new RegExp(`^(${raw}|${cleanPrefix})`, 'i') : new RegExp(`^${raw}`, 'i');
+    }
+
+    const teachers = await Teacher.find({
+      'timetable.class': { $regex: classRegex }
+    }).select('name email timetable');
+
+    const combinedTimetable = [];
+    teachers.forEach((t) => {
+      (t.timetable || []).forEach((slot) => {
+        const slotClass = (slot.class || '').trim();
+        const slotSec = (slot.section || '').trim();
+
+        if (classRegex.test(slotClass)) {
+          if (!slotSec || !cleanSection || slotSec.toLowerCase() === cleanSection.toLowerCase()) {
+            const slotObj = slot.toObject ? slot.toObject() : { ...slot };
+            combinedTimetable.push({
+              ...slotObj,
+              teacherName: t.name,
+              teacherEmail: t.email
+            });
+          }
+        }
+      });
+    });
+
+    return res.status(200).json({
+      success: true,
+      count: combinedTimetable.length,
+      timetable: combinedTimetable
+    });
+  } catch (error) {
+    console.error('Error in getStudentTimetable:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Server error while fetching student timetable.'
     });
   }
 };

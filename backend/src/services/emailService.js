@@ -152,6 +152,16 @@ const sendClassReminderEmail = async ({
 
     const emailSubject = `⏰ [Reminder] ${subject} starts in 5 minutes (${time})`;
 
+    const plainTextContent = `Hello ${recipientName},
+
+Your scheduled ${isTeacher ? 'lecture' : 'class'} "${subject}" (${className}${section ? `-${section}` : ''}) starts in 5 minutes at ${time}${teacherName ? ` with ${teacherName}` : ''}.
+
+Please open MyEra to ${isTeacher ? 'launch your attendance session' : 'mark your attendance'}:
+${frontendUrl}/${role === 'teacher' ? 'teacher' : 'student'}
+
+- MyEra Smart Classroom
+`;
+
     // 1. Try Vercel HTTPS Email Relay (Bypasses Render's outbound SMTP port blocking over port 443)
     if (frontendUrl && (process.env.SMTP_USER || process.env.SMTP_PASS)) {
       try {
@@ -164,6 +174,7 @@ const sendClassReminderEmail = async ({
           body: JSON.stringify({
             to,
             subject: emailSubject,
+            text: plainTextContent,
             html: htmlContent,
             from: fromAddress,
             senderEmail,
@@ -199,6 +210,7 @@ const sendClassReminderEmail = async ({
       from: fromAddress,
       to,
       subject: emailSubject,
+      text: plainTextContent,
       html: htmlContent
     });
 

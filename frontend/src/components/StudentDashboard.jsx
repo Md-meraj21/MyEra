@@ -43,9 +43,10 @@ const StudentDashboard = () => {
     if (!studentId) return;
     try {
       setLoading(true);
-      const [stripRes, histRes] = await Promise.allSettled([
+      const [stripRes, histRes, ttRes] = await Promise.allSettled([
         studentAPI.getAttendanceStrip(studentId),
-        studentAPI.getAttendanceHistory(studentId)
+        studentAPI.getAttendanceHistory(studentId),
+        studentAPI.getTimetable(studentId)
       ]);
 
       if (stripRes.status === 'fulfilled' && stripRes.value.data.success) {
@@ -57,6 +58,10 @@ const StudentDashboard = () => {
 
       if (histRes.status === 'fulfilled' && histRes.value.data.success) {
         setHistory(histRes.value.data.history || []);
+      }
+
+      if (ttRes.status === 'fulfilled' && ttRes.value.data.success) {
+        setTimetable(ttRes.value.data.timetable || []);
       }
     } catch (err) {
       console.error('Error loading student data:', err);
@@ -311,6 +316,18 @@ const StudentDashboard = () => {
                 setActiveTab('history');
               }}
             />
+
+            {/* Today's Scheduled Lectures & Automated 5-Min Reminder Watcher */}
+            <div className="pt-2">
+              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">
+                Today's Scheduled Lectures
+              </h3>
+              <Timetable
+                timetable={timetable}
+                isTeacher={false}
+                user={user}
+              />
+            </div>
           </div>
         )}
 
@@ -462,7 +479,7 @@ const StudentDashboard = () => {
                 View your lectures and scheduled periods for all subjects.
               </p>
             </div>
-            <Timetable isTeacher={false} />
+            <Timetable timetable={timetable} isTeacher={false} user={user} />
           </div>
         )}
 

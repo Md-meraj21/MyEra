@@ -15,10 +15,10 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { to, subject, html, auth, from, senderEmail } = req.body;
+    const { to, subject, html, text, auth, from, senderEmail } = req.body;
 
-    if (!to || !subject || !html) {
-      return res.status(400).json({ success: false, error: 'Missing required email fields (to, subject, html)' });
+    if (!to || !subject || (!html && !text)) {
+      return res.status(400).json({ success: false, error: 'Missing required email fields (to, subject, html/text)' });
     }
 
     const user = auth?.user || process.env.SMTP_USER || 'kb759827@gmail.com';
@@ -39,12 +39,17 @@ export default async function handler(req, res) {
       socketTimeout: 15000
     });
 
-    const info = await transporter.sendMail({
+    const mailOptions = {
       from: from || `"MyEra Smart Classroom" <${senderEmail || user}>`,
       to,
       subject,
       html
-    });
+    };
+    if (text) {
+      mailOptions.text = text;
+    }
+
+    const info = await transporter.sendMail(mailOptions);
 
     console.log(`✅ [Vercel Email Relay] Successfully sent email to ${to}: ${info.messageId}`);
     return res.status(200).json({ success: true, messageId: info.messageId });

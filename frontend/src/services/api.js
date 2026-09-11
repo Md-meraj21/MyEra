@@ -64,6 +64,7 @@ export const studentAPI = {
   markAttendance: (data) => api.post('/student/mark-attendance', data),
   getAttendanceStrip: (studentId) => api.get(`/student/strip/${studentId}`),
   getAttendanceHistory: (studentId) => api.get(`/student/history/${studentId}`),
+  getTimetable: (studentId) => api.get(`/student/timetable/${studentId}`),
 };
 
 export const notificationAPI = {

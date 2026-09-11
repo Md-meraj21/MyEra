@@ -48,6 +48,48 @@ const pruneOldCache = (todayKey) => {
 };
 
 /**
+ * Helper to match student stream/branch flexibly (e.g. CS-4A -> CSE, Civil -> CE, etc.)
+ */
+const buildStudentClassFilter = (className, section) => {
+  if (!className) return {};
+  const raw = String(className).trim().toUpperCase();
+
+  let classRegex;
+  if (/^(CS|CSE|COMPUTER)/.test(raw)) {
+    classRegex = /^(CS|CSE|COMPUTER)/i;
+  } else if (/^(CIVIL|CE)/.test(raw)) {
+    classRegex = /^(CIVIL|CE)/i;
+  } else if (/^(MECH|MECHANICAL|ME)/.test(raw)) {
+    classRegex = /^(MECH|MECHANICAL|ME)/i;
+  } else if (/^(ELECTRICAL|EE|EEE)/.test(raw)) {
+    classRegex = /^(ELECTRICAL|EE|EEE)/i;
+  } else if (/^(ELECTRONICS|ECE)/.test(raw)) {
+    classRegex = /^(ELECTRONICS|ECE)/i;
+  } else {
+    const cleanPrefix = raw.replace(/[-_\s]*\d+.*$/, '').trim();
+    if (cleanPrefix.length >= 2) {
+      classRegex = new RegExp(`^(${raw}|${cleanPrefix})`, 'i');
+    } else {
+      classRegex = new RegExp(`^${raw}`, 'i');
+    }
+  }
+
+  const query = { class: { $regex: classRegex } };
+
+  const cleanSec = (section || '').trim();
+  if (cleanSec) {
+    query.$or = [
+      { section: { $regex: new RegExp(`^${cleanSec}$`, 'i') } },
+      { section: { $exists: false } },
+      { section: '' },
+      { section: null }
+    ];
+  }
+
+  return query;
+};
+
+/**
  * Check and process 5-minute class reminders
  */
 const processClassReminders = async () => {
@@ -105,46 +147,6 @@ const processClassReminders = async () => {
           }
           sentRemindersCache.add(dedupeKey);
 
-// Helper to match student stream/branch flexibly (e.g. CS-4A -> CSE, Civil -> CE, etc.)
-const buildStudentClassFilter = (className, section) => {
-  if (!className) return {};
-  const raw = String(className).trim().toUpperCase();
-
-  let classRegex;
-  if (/^(CS|CSE|COMPUTER)/.test(raw)) {
-    classRegex = /^(CS|CSE|COMPUTER)/i;
-  } else if (/^(CIVIL|CE)/.test(raw)) {
-    classRegex = /^(CIVIL|CE)/i;
-  } else if (/^(MECH|MECHANICAL|ME)/.test(raw)) {
-    classRegex = /^(MECH|MECHANICAL|ME)/i;
-  } else if (/^(ELECTRICAL|EE|EEE)/.test(raw)) {
-    classRegex = /^(ELECTRICAL|EE|EEE)/i;
-  } else if (/^(ELECTRONICS|ECE)/.test(raw)) {
-    classRegex = /^(ELECTRONICS|ECE)/i;
-  } else {
-    const cleanPrefix = raw.replace(/[-_\s]*\d+.*$/, '').trim();
-    if (cleanPrefix.length >= 2) {
-      classRegex = new RegExp(`^(${raw}|${cleanPrefix})`, 'i');
-    } else {
-      classRegex = new RegExp(`^${raw}`, 'i');
-    }
-  }
-
-  const query = { class: { $regex: classRegex } };
-
-  const cleanSec = (section || '').trim();
-  if (cleanSec) {
-    query.$or = [
-      { section: { $regex: new RegExp(`^${cleanSec}$`, 'i') } },
-      { section: { $exists: false } },
-      { section: '' },
-      { section: null }
-    ];
-  }
-
-  return query;
-};
-
           console.log(`⏰ [ReminderScheduler] Triggering 5-minute student alert for "${entry.subject}" (${entry.class}-${entry.section}, ${entry.time})`);
 
           // Find and Notify Enrolled Students of this stream
@@ -158,6 +160,7 @@ const buildStudentClassFilter = (className, section) => {
 
             if (students && students.length > 0) {
               const allStudentTokens = [];
+              const emailPromises = [];
 
               for (const student of students) {
                 // Collect FCM push tokens
@@ -167,18 +170,28 @@ const buildStudentClassFilter = (className, section) => {
 
                 // Send individual student email
                 if (student.email) {
-                  sendClassReminderEmail({
-                    to: student.email,
-                    recipientName: student.name,
-                    role: 'student',
-                    subject: entry.subject,
-                    className: entry.class,
-                    section: entry.section,
-                    period: entry.period,
-                    time: entry.time,
-                    teacherName: teacher.name
-                  }).catch((e) => console.error(`[ReminderScheduler] Student email error (${student.email}):`, e.message));
+                  emailPromises.push(
+                    sendClassReminderEmail({
+                      to: student.email,
+                      recipientName: student.name,
+                      role: 'student',
+                      subject: entry.subject,
+                      className: entry.class,
+                      section: entry.section,
+                      period: entry.period,
+                      time: entry.time,
+                      teacherName: teacher.name
+                    }).catch((e) => {
+                      console.error(`[ReminderScheduler] Student email error (${student.email}):`, e.message);
+                      return { success: false, error: e.message };
+                    })
+                  );
                 }
+              }
+
+              // Await all email dispatches in parallel so they are not dropped
+              if (emailPromises.length > 0) {
+                await Promise.allSettled(emailPromises);
               }
 
               // Send batch multicast push notifications to all students of this stream
