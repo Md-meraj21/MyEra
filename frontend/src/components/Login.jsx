@@ -1,14 +1,14 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  GraduationCap, 
-  UserCheck, 
-  Lock, 
-  Mail, 
-  User, 
-  BookOpen, 
-  Hash, 
-  ArrowRight, 
+import {
+  GraduationCap,
+  UserCheck,
+  Lock,
+  Mail,
+  User,
+  BookOpen,
+  Hash,
+  ArrowRight,
   AlertCircle,
   CheckCircle2
 } from 'lucide-react';
@@ -32,8 +32,8 @@ const Login = ({ initialRole = 'student', onRoleChange, onSuccess }) => {
     password: '',
     subject: 'Computer Science & Engineering',
     rollNumber: '',
-    class: 'CS-4A',
-    section: 'A'
+    class: '',
+    section: ''
   });
 
   const handleRoleSwitch = (newRole) => {
@@ -56,7 +56,7 @@ const Login = ({ initialRole = 'student', onRoleChange, onSuccess }) => {
     try {
       const demoEmail = demoRole === 'teacher' ? 'teacher@myera.edu' : 'student@myera.edu';
       const demoPass = 'password123';
-      
+
       let res;
       if (demoRole === 'teacher') {
         res = await authAPI.teacherLogin({ email: demoEmail, password: demoPass });
@@ -81,7 +81,7 @@ const Login = ({ initialRole = 'student', onRoleChange, onSuccess }) => {
         password: 'password123',
         name: demoRole === 'teacher' ? 'Prof. Amit Sharma' : 'Rahul Kumar',
         rollNumber: 'CS2024-042',
-        class: 'CS-4A',
+        class: 'CS',
         section: 'A'
       }));
       setErrorMessage('Enter details and click Register to create your account.');
@@ -155,11 +155,10 @@ const Login = ({ initialRole = 'student', onRoleChange, onSuccess }) => {
         <button
           type="button"
           onClick={() => handleRoleSwitch('student')}
-          className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-            role === 'student'
+          className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${role === 'student'
               ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
               : 'text-slate-600 hover:text-blue-700'
-          }`}
+            }`}
         >
           <GraduationCap className="w-4 h-4" />
           <span>Student</span>
@@ -167,11 +166,10 @@ const Login = ({ initialRole = 'student', onRoleChange, onSuccess }) => {
         <button
           type="button"
           onClick={() => handleRoleSwitch('teacher')}
-          className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-            role === 'teacher'
+          className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${role === 'teacher'
               ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
               : 'text-slate-600 hover:text-blue-700'
-          }`}
+            }`}
         >
           <UserCheck className="w-4 h-4" />
           <span>Teacher</span>
