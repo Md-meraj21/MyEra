@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bell, BellRing, CheckCircle, AlertCircle, Sparkles, Send, Smartphone, Mail, RefreshCw } from 'lucide-react';
+import { Bell, BellRing, CheckCircle, AlertCircle, Sparkles, Smartphone, Mail, RefreshCw } from 'lucide-react';
 import { requestNotificationPermissionAndToken, onForegroundMessage } from '../services/firebase';
 import { notificationAPI } from '../services/api';
 
@@ -9,7 +9,6 @@ const NotificationPrompt = ({ user, role = 'student' }) => {
   const [isTokenSynced, setIsTokenSynced] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [statusMsg, setStatusMsg] = useState(null);
-  const [testLoading, setTestLoading] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const syncAttemptedRef = useRef(false);
 
@@ -73,6 +72,10 @@ const NotificationPrompt = ({ user, role = 'student' }) => {
   useEffect(() => {
     let unsubscribe = null;
     onForegroundMessage((payload) => {
+      // Teachers should never receive student class reminders
+      if (role === 'teacher') return;
+      if (payload.data?.role === 'student' && role !== 'student') return;
+
       const title = payload.notification?.title || payload.data?.title || '⏰ MyEra Class Alert';
       const body = payload.notification?.body || payload.data?.body || 'Your scheduled lecture is starting in 5 minutes!';
 
@@ -101,7 +104,7 @@ const NotificationPrompt = ({ user, role = 'student' }) => {
     return () => {
       if (typeof unsubscribe === 'function') unsubscribe();
     };
-  }, []);
+  }, [role]);
 
   const handleEnableReminders = async () => {
     setIsSubmitting(true);
@@ -154,56 +157,6 @@ const NotificationPrompt = ({ user, role = 'student' }) => {
     }
   };
 
-  const handleSendTestNotification = async () => {
-    setTestLoading(true);
-    setStatusMsg(null);
-
-    try {
-      let savedToken = localStorage.getItem('myera_fcm_token');
-
-      // If token is missing, generate and sync it right now
-      if (!savedToken && 'Notification' in window && Notification.permission === 'granted') {
-        savedToken = await syncDeviceToken(false);
-      }
-
-      const res = await notificationAPI.testReminder({
-        email: user?.email,
-        token: savedToken || undefined,
-        teacherName: user?.name,
-        role,
-        subject: user?.subject || (role === 'teacher' ? 'Class Lecture' : 'Class Period'),
-        time: 'Upcoming Period'
-      });
-
-      const emailResult = res.data?.results?.email;
-      const pushResult = res.data?.results?.push;
-
-      if (emailResult && !emailResult.success) {
-        setStatusMsg({
-          type: 'error',
-          text: `⚠️ Email delivery failed: ${emailResult.error || 'Check SMTP configuration.'}`
-        });
-      } else if (pushResult && !pushResult.success && emailResult?.success) {
-        setStatusMsg({
-          type: 'info',
-          text: `📧 Email delivered to ${user?.email}! (Push notification not received: ${pushResult.error || 'Ensure notifications are allowed in browser settings'})`
-        });
-      } else {
-        setStatusMsg({
-          type: 'success',
-          text: `🚀 Test reminder dispatched to ${user?.email || 'your device'}! Check your inbox and notification tray.`
-        });
-      }
-    } catch (err) {
-      setStatusMsg({
-        type: 'error',
-        text: err.response?.data?.message || err.message || 'Could not trigger test reminder.'
-      });
-    } finally {
-      setTestLoading(false);
-    }
-  };
-
   if (dismissed || !('Notification' in window)) {
     return null;
   }
@@ -237,8 +190,8 @@ const NotificationPrompt = ({ user, role = 'student' }) => {
           </div>
         </div>
 
-        <div className="flex items-center space-x-2">
-          {!isTokenSynced && (
+        {!isTokenSynced && (
+          <div className="flex items-center space-x-2">
             <button
               onClick={() => syncDeviceToken(true)}
               disabled={isSyncing}
@@ -248,18 +201,8 @@ const NotificationPrompt = ({ user, role = 'student' }) => {
               <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
               <span>{isSyncing ? 'Syncing...' : 'Sync Device'}</span>
             </button>
-          )}
-
-          <button
-            onClick={handleSendTestNotification}
-            disabled={testLoading}
-            className="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 transition flex items-center space-x-1.5 disabled:opacity-50 shadow-sm"
-            title="Send an immediate test alert to verify email and push setup"
-          >
-            <Send className="w-3 h-3 text-indigo-400" />
-            <span>{testLoading ? 'Testing...' : 'Test Alert'}</span>
-          </button>
-        </div>
+          </div>
+        )}
 
         {statusMsg && (
           <div className="w-full mt-2 text-xs py-2 px-3 rounded-lg flex items-center space-x-2 bg-slate-800/95 border border-slate-700 text-slate-200">

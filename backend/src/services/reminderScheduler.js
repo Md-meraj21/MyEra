@@ -159,13 +159,25 @@ const processClassReminders = async () => {
             console.log(`📢 [ReminderScheduler] Found ${students.length} student(s) for stream "${cleanClass}" (Section ${cleanSection || 'Any'}) for "${entry.subject}"`);
 
             if (students && students.length > 0) {
+              const teacherEmail = (teacher?.email || '').trim().toLowerCase();
+              const teacherTokens = new Set(Array.isArray(teacher?.notificationTokens) ? teacher.notificationTokens : []);
+
               const allStudentTokens = [];
               const emailPromises = [];
 
               for (const student of students) {
-                // Collect FCM push tokens
+                // Strictly exclude teacher email from receiving student email reminder
+                if (teacherEmail && student.email && student.email.trim().toLowerCase() === teacherEmail) {
+                  continue;
+                }
+
+                // Collect FCM push tokens, strictly excluding any belonging to teacher
                 if (student.notificationTokens && student.notificationTokens.length > 0) {
-                  allStudentTokens.push(...student.notificationTokens);
+                  student.notificationTokens.forEach((tok) => {
+                    if (tok && !teacherTokens.has(tok)) {
+                      allStudentTokens.push(tok);
+                    }
+                  });
                 }
 
                 // Send individual student email
@@ -195,9 +207,10 @@ const processClassReminders = async () => {
               }
 
               // Send batch multicast push notifications to all students of this stream
-              if (allStudentTokens.length > 0) {
+              const uniqueStudentTokens = Array.from(new Set(allStudentTokens));
+              if (uniqueStudentTokens.length > 0) {
                 sendPushNotification({
-                  tokens: allStudentTokens,
+                  tokens: uniqueStudentTokens,
                   title: `🎒 Class in 5 Mins: ${entry.subject}`,
                   body: `${entry.subject} with ${teacher.name} starts at ${entry.time.split('-')[0].trim()}. Get ready to mark attendance!`,
                   data: {

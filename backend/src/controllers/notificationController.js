@@ -177,7 +177,9 @@ exports.sendClassReminderToStudents = async (req, res) => {
       period = 1,
       time = '',
       teacherName: customTeacherName,
-      teacherId
+      teacherId,
+      teacherEmail: reqTeacherEmail,
+      teacherToken
     } = req.body;
 
     if (!subject || !className) {
@@ -195,6 +197,36 @@ exports.sendClassReminderToStudents = async (req, res) => {
     }
 
     const finalTeacherName = customTeacherName || teacher?.name || (req.user && req.user.name) || 'Faculty Member';
+    const teacherEmail = (
+      reqTeacherEmail ||
+      teacher?.email ||
+      (req.user && req.user.email) ||
+      ''
+    ).trim().toLowerCase();
+
+    // Collect all tokens belonging to the teacher to strictly exclude them from push notifications
+    const excludeTokens = new Set();
+    if (teacherToken) {
+      excludeTokens.add(teacherToken);
+    }
+    if (teacher && Array.isArray(teacher.notificationTokens)) {
+      teacher.notificationTokens.forEach((t) => {
+        if (t) excludeTokens.add(t);
+      });
+    }
+    if (teacherEmail) {
+      const teachersWithEmail = await Teacher.find({
+        email: new RegExp(`^${teacherEmail}$`, 'i')
+      }).select('notificationTokens');
+      teachersWithEmail.forEach((td) => {
+        if (Array.isArray(td.notificationTokens)) {
+          td.notificationTokens.forEach((t) => {
+            if (t) excludeTokens.add(t);
+          });
+        }
+      });
+    }
+
     const cleanClass = (className || '').trim();
     const cleanSection = (section || '').trim();
 
@@ -204,36 +236,52 @@ exports.sendClassReminderToStudents = async (req, res) => {
 
     console.log(`📢 [ClassReminder] Found ${students.length} student(s) for stream "${cleanClass}" (Section ${cleanSection || 'Any'}) for subject "${subject}"`);
 
-    // 1. Send individual Emails to all enrolled students
-    const emailPromises = students
-      .filter((s) => Boolean(s.email))
-      .map((s) =>
-        sendClassReminderEmail({
-          to: s.email,
-          recipientName: s.name,
-          role: 'student',
-          subject,
-          className: cleanClass,
-          section: cleanSection,
-          period: Number(period) || 1,
-          time: time || 'Upcoming slot',
-          teacherName: finalTeacherName
-        }).catch((e) => ({ success: false, error: e.message }))
-      );
+    // 1. Send individual Emails ONLY to students (excluding the teacher's email)
+    const eligibleStudents = students.filter((s) => {
+      if (!s.email) return false;
+      if (teacherEmail && s.email.trim().toLowerCase() === teacherEmail) {
+        return false;
+      }
+      return true;
+    });
 
-    // 2. Multicast push to all student device tokens
+    const emailPromises = eligibleStudents.map((s) =>
+      sendClassReminderEmail({
+        to: s.email,
+        recipientName: s.name,
+        role: 'student',
+        subject,
+        className: cleanClass,
+        section: cleanSection,
+        period: Number(period) || 1,
+        time: time || 'Upcoming slot',
+        teacherName: finalTeacherName
+      }).catch((e) => ({ success: false, error: e.message }))
+    );
+
+    // 2. Multicast push to student device tokens (excluding any tokens belonging to teacher)
     const studentTokens = [];
     students.forEach((s) => {
+      // Exclude tokens if student account has teacher's email
+      if (teacherEmail && s.email && s.email.trim().toLowerCase() === teacherEmail) {
+        return;
+      }
       if (Array.isArray(s.notificationTokens)) {
-        studentTokens.push(...s.notificationTokens);
+        s.notificationTokens.forEach((tok) => {
+          if (tok && !excludeTokens.has(tok)) {
+            studentTokens.push(tok);
+          }
+        });
       }
     });
 
+    const uniqueStudentTokens = Array.from(new Set(studentTokens));
+
     let pushResult = null;
-    if (studentTokens.length > 0) {
+    if (uniqueStudentTokens.length > 0) {
       const startTimeStr = time ? time.split('-')[0].trim() : 'soon';
       pushResult = await sendPushNotification({
-        tokens: studentTokens,
+        tokens: uniqueStudentTokens,
         title: `🎒 Class in 5 Mins: ${subject}`,
         body: `${subject} with ${finalTeacherName} starts at ${startTimeStr}. Open MyEra to mark your attendance!`,
         data: {
@@ -252,21 +300,21 @@ exports.sendClassReminderToStudents = async (req, res) => {
     ).length;
 
     let emailWarning = null;
-    if (students.length > 0 && successfulEmails === 0) {
+    if (eligibleStudents.length > 0 && successfulEmails === 0) {
       const firstFail = emailResults.find((r) => r.status === 'fulfilled' && !r.value?.success);
       emailWarning = firstFail?.value?.error || 'Email connection could not be established.';
     }
 
     return res.status(200).json({
       success: true,
-      studentCount: students.length,
+      studentCount: eligibleStudents.length,
       successfulEmails,
       emailWarning,
-      pushTokensCount: studentTokens.length,
+      pushTokensCount: uniqueStudentTokens.length,
       message: emailWarning
-        ? `⚠️ Found ${students.length} student(s), but email delivery issue: ${emailWarning}`
+        ? `⚠️ Found ${eligibleStudents.length} student(s), but email delivery issue: ${emailWarning}`
         : `Reminder for "${subject}" successfully sent to ${successfulEmails} student(s) of ${cleanClass}!`,
-      students: students.map((s) => ({ name: s.name, email: s.email, class: s.class, section: s.section }))
+      students: eligibleStudents.map((s) => ({ name: s.name, email: s.email, class: s.class, section: s.section }))
     });
   } catch (err) {
     console.error('Error in sendClassReminderToStudents:', err);

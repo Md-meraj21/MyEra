@@ -83,8 +83,8 @@ const Timetable = ({ timetable = [], onSaveTimetable, onStartSession, isTeacher 
 
           const diffText = diff === 0 ? 'Starting right now!' : `Starting in ${diff} minute${diff > 1 ? 's' : ''}!`;
 
-          // 1. Native Desktop/Mobile Push Notification
-          if ('Notification' in window && Notification.permission === 'granted') {
+          // 1. Native Desktop/Mobile Push Notification (Only for students)
+          if (!isTeacher && 'Notification' in window && Notification.permission === 'granted') {
             try {
               new Notification(`⏰ Upcoming Class: ${slot.subject}`, {
                 body: `${slot.class} (${slot.section || 'A'}) • ${diffText}`,
@@ -96,14 +96,17 @@ const Timetable = ({ timetable = [], onSaveTimetable, onStartSession, isTeacher 
             }
           }
 
-          // 2. In-App Banner
-          setNotifyToast({
-            type: 'success',
-            text: `⏰ Auto Alert: "${slot.subject}" (${slot.class}) is ${diffText}`
-          });
+          // 2. In-App Banner (Only for students)
+          if (!isTeacher) {
+            setNotifyToast({
+              type: 'success',
+              text: `⏰ Auto Alert: "${slot.subject}" (${slot.class}) is ${diffText}`
+            });
+          }
 
           // 3. If teacher, trigger student reminder in background
           if (isTeacher && user) {
+            const currentToken = typeof window !== 'undefined' ? localStorage.getItem('myera_fcm_token') : null;
             notificationAPI.sendClassReminder({
               subject: slot.subject,
               class: slot.class,
@@ -112,7 +115,8 @@ const Timetable = ({ timetable = [], onSaveTimetable, onStartSession, isTeacher 
               time: slot.time,
               teacherId: user?._id || user?.id,
               teacherName: user?.name,
-              teacherEmail: user?.email
+              teacherEmail: user?.email,
+              teacherToken: currentToken || undefined
             }).catch((e) => console.warn('Auto background reminder error:', e.message));
           }
         }
@@ -181,6 +185,7 @@ const Timetable = ({ timetable = [], onSaveTimetable, onStartSession, isTeacher 
     setNotifyingIdx(idx);
     setNotifyToast(null);
     try {
+      const currentToken = typeof window !== 'undefined' ? localStorage.getItem('myera_fcm_token') : null;
       const res = await notificationAPI.sendClassReminder({
         subject: slot.subject,
         class: slot.class,
@@ -188,7 +193,9 @@ const Timetable = ({ timetable = [], onSaveTimetable, onStartSession, isTeacher 
         period: slot.period,
         time: slot.time,
         teacherId: user?._id || user?.id,
-        teacherName: user?.name
+        teacherName: user?.name,
+        teacherEmail: user?.email,
+        teacherToken: currentToken || undefined
       });
 
       const count = res.data?.studentCount || 0;
