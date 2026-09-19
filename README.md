@@ -1,5 +1,10 @@
 # MyEra - Smart Classroom Attendance System
 
+Here the live URL 
+        Click Here for live URL 
+
+https://myera-eight.vercel.app/
+
 **MyEra** is a modern MERN Stack web application for automated, proxy-proof classroom attendance management using dynamic 120-second passcodes and high-precision 30-meter Haversine GPS geofencing.
 
 ---
