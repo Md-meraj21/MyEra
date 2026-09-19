@@ -161,8 +161,10 @@ const NotificationPrompt = ({ user, role = 'student' }) => {
     return null;
   }
 
-  // Already granted permission view
+  // Already granted permission view (Commented out to remove banner from screen)
   if (permission === 'granted') {
+    return null;
+    /*
     return (
       <div className="mb-6 bg-slate-900/70 backdrop-blur-md border border-emerald-500/30 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-lg shadow-emerald-950/20">
         <div className="flex items-center space-x-3">
@@ -224,6 +226,7 @@ const NotificationPrompt = ({ user, role = 'student' }) => {
         )}
       </div>
     );
+    */
   }
 
   // Permission not granted yet (Prompt banner)
