@@ -15,7 +15,13 @@ const verifyToken = (req, res, next) => {
     }
 
     const token = authHeader.split(' ')[1];
-    const secret = process.env.JWT_SECRET || 'myera_super_secret_jwt_key_smart_classroom_2026';
+    const secret = process.env.JWT_SECRET;
+    if (!secret) {
+      return res.status(500).json({
+        success: false,
+        message: 'Server configuration error: JWT_SECRET missing.'
+      });
+    }
 
     const decoded = jwt.verify(token, secret);
     req.user = decoded; // Contains id, email, role, etc.

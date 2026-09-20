@@ -4,7 +4,10 @@ const Teacher = require('../models/Teacher');
 const Student = require('../models/Student');
 
 const generateJwtToken = (payload) => {
-  const secret = process.env.JWT_SECRET || 'myera_super_secret_jwt_key_smart_classroom_2026';
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error('JWT_SECRET environment variable is missing.');
+  }
   return jwt.sign(payload, secret, { expiresIn: '7d' });
 };
 

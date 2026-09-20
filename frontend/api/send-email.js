@@ -21,11 +21,14 @@ export default async function handler(req, res) {
       return res.status(400).json({ success: false, error: 'Missing required email fields (to, subject, html/text)' });
     }
 
-    const user = auth?.user || process.env.SMTP_USER || 'kb759827@gmail.com';
-    const pass = auth?.pass || process.env.SMTP_PASS || 'zwyi izrd cooa wets';
+    const user = process.env.SMTP_USER || auth?.user;
+    const pass = process.env.SMTP_PASS || auth?.pass;
 
     if (!user || !pass) {
-      return res.status(400).json({ success: false, error: 'SMTP credentials missing' });
+      return res.status(500).json({ 
+        success: false, 
+        error: 'SMTP credentials missing. Please configure SMTP_USER and SMTP_PASS in environment variables.' 
+      });
     }
 
     const transporter = nodemailer.createTransport({

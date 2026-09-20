@@ -9,8 +9,10 @@ const optionalAuth = (req, res, next) => {
   if (authHeader && authHeader.startsWith('Bearer ')) {
     try {
       const token = authHeader.split(' ')[1];
-      const secret = process.env.JWT_SECRET || 'myera_super_secret_jwt_key_smart_classroom_2026';
-      req.user = jwt.verify(token, secret);
+      const secret = process.env.JWT_SECRET;
+      if (secret) {
+        req.user = jwt.verify(token, secret);
+      }
     } catch (e) {
       // Ignore invalid token in optionalAuth
     }
