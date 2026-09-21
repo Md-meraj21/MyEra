@@ -141,7 +141,14 @@ const Login = ({ initialRole = 'student', onRoleChange, onSuccess }) => {
       }
     } catch (err) {
       console.error('Auth error:', err);
-      const msg = err.response?.data?.message || 'Authentication failed. Please verify credentials.';
+      let msg = 'Authentication failed. Please verify credentials.';
+      if (err.response?.status === 503 || (typeof err.response?.data === 'string' && err.response?.data.includes('suspended'))) {
+        msg = 'Backend server (Render) is suspended. Please check or resume it in your Render dashboard.';
+      } else if (!err.response) {
+        msg = 'Cannot connect to backend server. Please check your server status.';
+      } else if (err.response?.data?.message) {
+        msg = err.response.data.message;
+      }
       setErrorMessage(msg);
     } finally {
       setLoading(false);
